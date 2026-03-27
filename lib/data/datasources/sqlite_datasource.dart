@@ -178,5 +178,176 @@ class SqliteDatasource {
   Future<void> removeModbusVariable(String name) =>
       db.delete('modbus_data', where: 'name=?', whereArgs: [name]);
 
+  Future<List<String>> getModbusNames() async {
+    final rows = await db.query('modbus_data', columns: ['name']);
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
+  // ── Import from external .db file ──────────────────────────────────────────
+  /// Reads HART and Modbus data from [sourcePath].
+  /// Supports two schemas:
+  ///   • Flutter schema : hart_meta + hart_data + modbus_data
+  ///   • Python schema  : HART_tabela + MODBUS_tabela (wide/transposed format)
+  Future<int> importFromDb(String sourcePath) async {
+    final srcDb = await openDatabase(sourcePath, readOnly: true);
+    try {
+      // Detect which schema the file uses
+      final hasPythonHart = (await _safeQuery(srcDb, 'HART_tabela')) != null;
+      if (hasPythonHart) {
+        return await _importPythonSchema(srcDb);
+      } else {
+        return await _importFlutterSchema(srcDb);
+      }
+    } finally {
+      await srcDb.close();
+    }
+  }
+
+  // ── Flutter-schema import ──────────────────────────────────────────────────
+  Future<int> _importFlutterSchema(Database srcDb) async {
+    int count = 0;
+
+    final metaRows = await _safeQuery(srcDb, 'hart_meta');
+    if (metaRows != null) {
+      final batch = db.batch();
+      batch.delete('hart_meta');
+      for (final r in metaRows) {
+        batch.insert('hart_meta', {
+          'col_name':  r['col_name'],
+          'byte_size': r['byte_size'],
+          'type_str':  r['type_str'],
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await batch.commit(noResult: true);
+    }
+
+    final dataRows = await _safeQuery(srcDb, 'hart_data');
+    if (dataRows != null) {
+      final batch = db.batch();
+      batch.delete('hart_data');
+      for (final r in dataRows) {
+        batch.insert('hart_data', {
+          'device':    r['device'],
+          'col':       r['col'],
+          'raw_value': r['raw_value'],
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        count++;
+      }
+      await batch.commit(noResult: true);
+    }
+
+    final mbRows = await _safeQuery(srcDb, 'modbus_data');
+    if (mbRows != null) {
+      final batch = db.batch();
+      batch.delete('modbus_data');
+      for (final r in mbRows) {
+        batch.insert('modbus_data', {
+          'name':      r['name'],
+          'byte_size': r['byte_size'],
+          'type_str':  r['type_str'],
+          'mb_point':  r['mb_point'],
+          'address':   r['address'],
+          'formula':   r['formula'] ?? r['raw_value'] ?? '',
+          'raw_value': r['raw_value'] ?? r['formula'] ?? '',
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        count++;
+      }
+      await batch.commit(noResult: true);
+    }
+    return count;
+  }
+
+  // ── Python-schema import ───────────────────────────────────────────────────
+  // Python HART_tabela: transposed — rows are columns (NAME=col_name),
+  // each device is a separate TEXT column.
+  // Python MODBUS_tabela: NAME, BYTE_SIZE, TYPE, MB_POINT, ADDRESS, CLP100
+  static const _pythonDevices = [
+    'FV100CA', 'FIT100CA', 'FV100AR', 'FIT100AR', 'TIT100',
+    'FIT100V', 'PIT100V',  'LIT100',  'PIT100A',  'FV100A',  'FIT100A',
+  ];
+
+  Future<int> _importPythonSchema(Database srcDb) async {
+    int count = 0;
+
+    // ── HART ────────────────────────────────────────────────────────────────
+    final hartRows = await _safeQuery(srcDb, 'HART_tabela');
+    if (hartRows != null && hartRows.isNotEmpty) {
+      final metaBatch = db.batch();
+      final dataBatch = db.batch();
+      metaBatch.delete('hart_meta');
+      dataBatch.delete('hart_data');
+
+      for (final r in hartRows) {
+        final colName  = (r['NAME'] as String?)?.toLowerCase() ?? '';
+        final byteSize = int.tryParse(r['BYTE_SIZE']?.toString() ?? '') ?? 1;
+        final typeStr  = (r['TYPE'] as String?) ?? 'UNSIGNED';
+
+        if (colName.isEmpty) continue;
+
+        metaBatch.insert('hart_meta', {
+          'col_name':  colName,
+          'byte_size': byteSize,
+          'type_str':  typeStr,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+        for (final dev in _pythonDevices) {
+          // The Python DB uses uppercase device names as column names
+          final rawVal = r[dev]?.toString() ?? '00';
+          dataBatch.insert('hart_data', {
+            'device':    dev,
+            'col':       colName,
+            'raw_value': rawVal,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          count++;
+        }
+      }
+
+      await metaBatch.commit(noResult: true);
+      await dataBatch.commit(noResult: true);
+    }
+
+    // ── Modbus ───────────────────────────────────────────────────────────────
+    final mbRows = await _safeQuery(srcDb, 'MODBUS_tabela');
+    if (mbRows != null) {
+      final batch = db.batch();
+      batch.delete('modbus_data');
+      for (final r in mbRows) {
+        final name     = (r['NAME'] as String?) ?? '';
+        final byteSize = int.tryParse(r['BYTE_SIZE']?.toString() ?? '') ?? 4;
+        final typeStr  = (r['TYPE'] as String?) ?? 'UNSIGNED';
+        final mbPoint  = (r['MB_POINT'] as String?) ?? 'ir';
+        final address  = (r['ADDRESS'] as String?) ?? '01';
+        final formula  = (r['CLP100'] as String?) ?? '00000000';
+        if (name.isEmpty) continue;
+        batch.insert('modbus_data', {
+          'name':      name,
+          'byte_size': byteSize,
+          'type_str':  typeStr,
+          'mb_point':  mbPoint.toLowerCase(),
+          'address':   address,
+          'formula':   formula,
+          'raw_value': formula,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        count++;
+      }
+      await batch.commit(noResult: true);
+    }
+
+    return count;
+  }
+
+  Future<List<Map<String, Object?>>?> _safeQuery(
+      Database d, String table) async {
+    try {
+      final tables = await d.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+          [table]);
+      if (tables.isEmpty) return null;
+      return d.query(table);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> close() => _db?.close() ?? Future.value();
 }

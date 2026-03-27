@@ -30,4 +30,9 @@ abstract class IDbRepository {
   // ── Modbus CRUD ─────────────────────────────────────────────────────────────
   Future<void> addModbusVariable(String name, int byteSize, String typeStr, String mbPoint, String address, String formula);
   Future<void> removeModbusVariable(String name);
+
+  // ── Import ──────────────────────────────────────────────────────────────────
+  /// Imports HART and Modbus data from an external SQLite .db file.
+  /// Returns the number of rows imported.
+  Future<int> importFromDb(String sourcePath);
 }

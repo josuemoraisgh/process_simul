@@ -52,14 +52,17 @@ class DbRepositoryImpl implements IDbRepository {
 
   @override
   Future<List<String>> rowKeys(String tableName) async {
-    if (tableName == 'HART') return kHartDevices.toList();
-    if (tableName == 'MODBUS') return kModbusTemplate.keys.toList();
+    if (tableName == 'HART') return _ds.getHartDevices();
+    if (tableName == 'MODBUS') return _ds.getModbusNames();
     return [];
   }
 
   @override
   Future<List<String>> colKeys(String tableName) async {
-    if (tableName == 'HART') return kHartTemplate.keys.toList();
+    if (tableName == 'HART') {
+      final meta = await _ds.getHartMeta();
+      return meta.map((r) => r['col_name'] as String).toList();
+    }
     if (tableName == 'MODBUS') {
       return ['name', 'byte_size', 'type_str', 'mb_point', 'address', 'formula'];
     }
@@ -157,4 +160,8 @@ class DbRepositoryImpl implements IDbRepository {
   @override
   Future<void> removeModbusVariable(String name) =>
       _ds.removeModbusVariable(name);
+
+  // ── Import ──────────────────────────────────────────────────────────────────
+  @override
+  Future<int> importFromDb(String sourcePath) => _ds.importFromDb(sourcePath);
 }

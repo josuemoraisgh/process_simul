@@ -227,19 +227,15 @@ class _HartTableState extends State<_HartTable> {
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800,
                     color: AppColors.textSecondary, letterSpacing: 1)),
           ),
-          // Scrollable column headers (synced with body)
+          // Scrollable column headers (synced with body, no visible scrollbar)
           Expanded(
-            child: Scrollbar(
+            child: SingleChildScrollView(
               controller: _hHeadCtrl,
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                controller: _hHeadCtrl,
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: s.visibleCols
-                      .map((c) => _ColHeader(label: c, width: _colW))
-                      .toList(),
-                ),
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: s.visibleCols
+                    .map((c) => _ColHeader(label: c, width: _colW))
+                    .toList(),
               ),
             ),
           ),

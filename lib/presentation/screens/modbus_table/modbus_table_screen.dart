@@ -53,7 +53,13 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
         height: 36,
         color: AppColors.cardDark,
         child: Row(
-          children: _cols.map((c) => _HeaderCell(label: c)).toList(),
+          children: [
+            for (int i = 0; i < _cols.length; i++)
+              _HeaderCell(
+                label: _cols[i],
+                flex: i == _cols.length - 1 ? 2 : 1,
+              ),
+          ],
         ),
       ),
       const Divider(height: 1),
@@ -213,10 +219,12 @@ class _ToolBtn extends StatelessWidget {
 // ── Header / row widgets ──────────────────────────────────────────────────────
 class _HeaderCell extends StatelessWidget {
   final String label;
-  const _HeaderCell({required this.label});
+  final int flex;
+  const _HeaderCell({required this.label, this.flex = 1});
 
   @override
   Widget build(BuildContext context) => Expanded(
+        flex: flex,
         child: Container(
           alignment: Alignment.centerLeft,
           padding: const EdgeInsets.symmetric(horizontal: 10),
