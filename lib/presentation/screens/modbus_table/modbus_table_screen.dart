@@ -41,7 +41,9 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
   @override
   Widget build(BuildContext context) {
     final ModbusTableState mbState = ref.watch(modbusTableProvider);
-    final hart = ref.watch(hartTableProvider);
+    // Read HART data reference (mutated in-place) and notifier for value ticks.
+    final hartNotifier = ref.read(hartTableProvider.notifier);
+    final hartData = hartNotifier.state.data;
     var rows = mbState.data.entries.toList();
 
     if (mbState.loading) {
@@ -97,39 +99,43 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
         child: Scrollbar(
           controller: _scrollCtrl,
           thumbVisibility: true,
-          child: ListView.builder(
-            controller: _scrollCtrl,
-            itemCount: rows.length,
-            itemBuilder: (_, i) {
-              final name = rows[i].key;
-              final (byteSize, typeStr, mbPoint, address, formula) =
-                  rows[i].value;
-              final isHr = mbPoint == 'hr';
+          // Rebuilds only when HART values actually change (via ValueNotifier).
+          child: ValueListenableBuilder<int>(
+            valueListenable: hartNotifier.dataVersionNotifier,
+            builder: (_, __, ___) => ListView.builder(
+              controller: _scrollCtrl,
+              itemCount: rows.length,
+              itemBuilder: (_, i) {
+                final name = rows[i].key;
+                final (byteSize, typeStr, mbPoint, address, formula) =
+                    rows[i].value;
+                final isHr = mbPoint == 'hr';
 
-              // Compute live value from HART table if formula is an expression
-              String liveVal = formula;
-              if (formula.startsWith('@')) {
-                try {
-                  final result = HartTransmitter.evaluateExpr(
-                      formula.substring(1), hart.data);
-                  liveVal = result.truncate().toString();
-                } catch (_) {
-                  liveVal = '?';
+                // Compute live value from HART table if formula is an expression
+                String liveVal = formula;
+                if (formula.startsWith('@')) {
+                  try {
+                    final result = HartTransmitter.evaluateExpr(
+                        formula.substring(1), hartData);
+                    liveVal = result.truncate().toString();
+                  } catch (_) {
+                    liveVal = '?';
+                  }
                 }
-              }
 
-              return _ModbusRow(
-                index: i,
-                name: name,
-                byteSize: byteSize,
-                typeStr: typeStr,
-                mbPoint: mbPoint,
-                address: address,
-                formula: formula,
-                liveVal: liveVal,
-                isWritable: isHr || mbPoint == 'co',
-              );
-            },
+                return _ModbusRow(
+                  index: i,
+                  name: name,
+                  byteSize: byteSize,
+                  typeStr: typeStr,
+                  mbPoint: mbPoint,
+                  address: address,
+                  formula: formula,
+                  liveVal: liveVal,
+                  isWritable: isHr || mbPoint == 'co',
+                );
+              },
+            ),
           ),
         ),
       ),

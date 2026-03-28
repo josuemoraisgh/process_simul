@@ -9,7 +9,15 @@ class HartTypeConverter {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Hex → engineering/human value as a [String].
-  static String hexToHuman(String hex, String typeStr) {
+  ///
+  /// For ENUM types, pass [enumMap] with { hexKey → description }.
+  /// For BIT_ENUM types, pass [bitEnumMap] with { mask → description }.
+  static String hexToHuman(
+    String hex,
+    String typeStr, {
+    Map<String, String>? enumMap,
+    Map<int, String>? bitEnumMap,
+  }) {
     try {
       final t = typeStr.toUpperCase();
       if (t.contains('FLOAT') || t == 'SREAL') return _sreal2human(hex);
@@ -19,7 +27,18 @@ class HartTypeConverter {
       if (t.contains('DATE')) return _date2human(hex);
       if (t.contains('TIME')) return _time2human(hex);
       if (t.contains('BOOL')) return hex;
-      if (t.contains('ENUM') || t.contains('BIT_ENUM')) return hex; // raw hex
+      if (t.contains('BIT_ENUM')) {
+        if (bitEnumMap != null && bitEnumMap.isNotEmpty) {
+          return _bitEnum2human(hex, bitEnumMap);
+        }
+        return hex;
+      }
+      if (t.contains('ENUM')) {
+        if (enumMap != null && enumMap.isNotEmpty) {
+          return _enum2human(hex, enumMap);
+        }
+        return hex;
+      }
       return hex;
     } catch (_) {
       return hex;
@@ -27,22 +46,119 @@ class HartTypeConverter {
   }
 
   /// Engineering/human value [String] → hex.
-  static String humanToHex(String value, String typeStr, int byteSize) {
+  static String humanToHex(
+    String value,
+    String typeStr,
+    int byteSize, {
+    Map<String, String>? enumMap,
+    Map<int, String>? bitEnumMap,
+  }) {
     try {
       final t = typeStr.toUpperCase();
       if (t.contains('FLOAT') || t == 'SREAL') {
         return _human2sreal(double.parse(value));
       }
-      if (t.contains('UNSIGNED')) return _human2uint(int.parse(value), byteSize);
+      if (t.contains('UNSIGNED'))
+        return _human2uint(int.parse(value), byteSize);
       if (t.contains('INTEGER')) return _human2int(int.parse(value), byteSize);
       if (t.contains('PACKED')) return _human2pascii(value, byteSize);
       if (t.contains('DATE')) return _human2date(value, byteSize);
       if (t.contains('BOOL')) return value;
-      if (t.contains('ENUM') || t.contains('BIT_ENUM')) return value; // pass-through
+      if (t.contains('BIT_ENUM')) {
+        if (bitEnumMap != null && bitEnumMap.isNotEmpty) {
+          return _human2bitEnum(value, bitEnumMap, byteSize);
+        }
+        return value;
+      }
+      if (t.contains('ENUM')) {
+        if (enumMap != null && enumMap.isNotEmpty) {
+          return _human2enum(value, enumMap, byteSize);
+        }
+        return value;
+      }
       return value;
     } catch (_) {
       return value;
     }
+  }
+
+  // ── ENUM lookup (supports range keys like "F0-F9") ──────────────────────────
+  static String _enum2human(String hex, Map<String, String> map) {
+    final hexUp = hex.toUpperCase().replaceFirst(RegExp(r'^0+'), '');
+    final normalised = hexUp.isEmpty ? '0' : hexUp;
+    // Exact match first
+    for (final entry in map.entries) {
+      if (entry.key.toUpperCase() == hex.toUpperCase()) return entry.value;
+      if (entry.key.toUpperCase() == normalised) return entry.value;
+    }
+    // Range match "XX-YY"
+    final intVal = int.tryParse(hex, radix: 16);
+    if (intVal != null) {
+      for (final entry in map.entries) {
+        final key = entry.key.toUpperCase();
+        if (key.contains('-')) {
+          final parts = key.split('-');
+          if (parts.length == 2) {
+            final lo = int.tryParse(parts[0], radix: 16);
+            final hi = int.tryParse(parts[1], radix: 16);
+            if (lo != null && hi != null && intVal >= lo && intVal <= hi) {
+              return entry.value;
+            }
+          }
+        }
+      }
+    }
+    return hex; // fallback to raw hex
+  }
+
+  static String _human2enum(
+      String value, Map<String, String> map, int byteSize) {
+    // If value is already a valid hex string, return it
+    final intVal = int.tryParse(value, radix: 16);
+    if (intVal != null) return value;
+    // Reverse lookup by description
+    for (final entry in map.entries) {
+      if (entry.value == value) {
+        final k = entry.key;
+        if (k.contains('-')) return k.split('-').first;
+        return k.padLeft(byteSize * 2, '0').toUpperCase();
+      }
+    }
+    return value;
+  }
+
+  // ── BIT_ENUM lookup (bitwise AND) ───────────────────────────────────────────
+  static String _bitEnum2human(String hex, Map<int, String> map) {
+    final intVal = int.tryParse(hex, radix: 16) ?? 0;
+    if (intVal == 0) {
+      return map.containsKey(0) ? map[0]! : '0';
+    }
+    final labels = <String>[];
+    for (final entry in map.entries) {
+      if (entry.key == 0) continue;
+      if ((intVal & entry.key) == entry.key) {
+        labels.add(entry.value);
+      }
+    }
+    return labels.isEmpty ? hex : labels.join(' | ');
+  }
+
+  static String _human2bitEnum(
+      String value, Map<int, String> map, int byteSize) {
+    // If value is already a valid hex string, return it
+    final intVal = int.tryParse(value, radix: 16);
+    if (intVal != null) return value;
+    // Reverse lookup: OR together all matching bit masks
+    int result = 0;
+    final parts = value.split('|').map((s) => s.trim()).toList();
+    for (final part in parts) {
+      for (final entry in map.entries) {
+        if (entry.value.trim() == part) {
+          result |= entry.key;
+        }
+      }
+    }
+    return result.toRadixString(16).padLeft(byteSize * 2, '0').toUpperCase();
   }
 
   // ── IEEE-754 SREAL ──────────────────────────────────────────────────────────
@@ -63,7 +179,11 @@ class HartTypeConverter {
 
   static String _human2sreal(double v) {
     final bd = ByteData(4)..setFloat32(0, v, Endian.big);
-    return bd.buffer.asUint8List().map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+    return bd.buffer
+        .asUint8List()
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
   }
 
   // ── UNSIGNED ────────────────────────────────────────────────────────────────
@@ -142,15 +262,19 @@ class HartTypeConverter {
     }
     if (accBits > 0) out.add((acc << (8 - accBits)) & 0xFF);
     while (out.length < byteSize) out.add(0);
-    return out.take(byteSize).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+    return out
+        .take(byteSize)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
   }
 
   // ── DATE (DD/MM/YYYY) ───────────────────────────────────────────────────────
   static String _date2human(String hex) {
     if (hex.length < 6) return '';
-    final day  = int.parse(hex.substring(0, 2), radix: 16);
-    final mon  = int.parse(hex.substring(2, 4), radix: 16);
-    final yr   = 1900 + int.parse(hex.substring(4, 6), radix: 16);
+    final day = int.parse(hex.substring(0, 2), radix: 16);
+    final mon = int.parse(hex.substring(2, 4), radix: 16);
+    final yr = 1900 + int.parse(hex.substring(4, 6), radix: 16);
     return '${day.toString().padLeft(2, '0')}/${mon.toString().padLeft(2, '0')}/$yr';
   }
 
@@ -159,8 +283,9 @@ class HartTypeConverter {
     if (parts.length < 3) return '000000';
     final day = int.parse(parts[0]);
     final mon = int.parse(parts[1]);
-    final yr  = int.parse(parts[2]) - 1900;
-    return '${day.toRadixString(16).padLeft(2, '0')}${mon.toRadixString(16).padLeft(2, '0')}${yr.toRadixString(16).padLeft(2, '0')}'.toUpperCase();
+    final yr = int.parse(parts[2]) - 1900;
+    return '${day.toRadixString(16).padLeft(2, '0')}${mon.toRadixString(16).padLeft(2, '0')}${yr.toRadixString(16).padLeft(2, '0')}'
+        .toUpperCase();
   }
 
   // ── TIME ────────────────────────────────────────────────────────────────────
@@ -173,9 +298,9 @@ class HartTypeConverter {
       int.parse(hex.substring(6, 8), radix: 16),
     ];
     final totalMs = b[0] * 524288 + b[1] * 2048 + b[2] * 8 + b[2] * 0.03125;
-    final h  = totalMs ~/ 3600000;
-    final m  = (totalMs % 3600000) ~/ 60000;
-    final s  = (totalMs % 60000) ~/ 1000;
+    final h = totalMs ~/ 3600000;
+    final m = (totalMs % 3600000) ~/ 60000;
+    final s = (totalMs % 60000) ~/ 1000;
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
@@ -198,6 +323,28 @@ class HartTypeConverter {
 
   static String doubleToHex(double v) {
     final bd = ByteData(4)..setFloat32(0, v, Endian.big);
-    return bd.buffer.asUint8List().map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+    return bd.buffer
+        .asUint8List()
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
   }
+
+  // ── Helpers for parsing ENUM/BIT_ENUM index from typeStr ────────────────────
+  /// Parses "ENUM00" → 0, "ENUM27" → 27. Returns -1 if not an ENUM type.
+  static int parseEnumIndex(String typeStr) {
+    final m = RegExp(r'ENUM(\d+)', caseSensitive: false).firstMatch(typeStr);
+    return m != null ? (int.tryParse(m.group(1)!) ?? -1) : -1;
+  }
+
+  /// Parses "BIT_ENUM02" → 2. Returns -1 if not a BIT_ENUM type.
+  static int parseBitEnumIndex(String typeStr) {
+    final m =
+        RegExp(r'BIT_ENUM(\d+)', caseSensitive: false).firstMatch(typeStr);
+    return m != null ? (int.tryParse(m.group(1)!) ?? -1) : -1;
+  }
+
+  /// Returns true if typeStr is an ENUM or BIT_ENUM type.
+  static bool isEnumType(String typeStr) =>
+      typeStr.toUpperCase().contains('ENUM');
 }

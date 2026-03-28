@@ -23,7 +23,7 @@ class DbRepositoryImpl implements IDbRepository {
   Future<ReactVar?> getCell(
       String tableName, String rowName, String colName) async {
     if (tableName == 'HART') {
-      final raw = await _ds.getHartCell(rowName, colName);
+      final raw = _ds.getHartCell(rowName, colName);
       if (raw == null) return null;
       final meta = kHartTemplate[colName];
       if (meta == null) return null;
@@ -44,9 +44,9 @@ class DbRepositoryImpl implements IDbRepository {
   Future<void> setRawValue(
       String tableName, String rowName, String colName, String rawValue) async {
     if (tableName == 'HART') {
-      await _ds.setHartCell(rowName, colName, rawValue);
+      _ds.setHartCell(rowName, colName, rawValue);
     } else if (tableName == 'MODBUS') {
-      await _ds.setModbusValue(rowName, rawValue);
+      _ds.setModbusValue(rowName, rawValue);
     }
   }
 
@@ -60,22 +60,32 @@ class DbRepositoryImpl implements IDbRepository {
   @override
   Future<List<String>> colKeys(String tableName) async {
     if (tableName == 'HART') {
-      final meta = await _ds.getHartMeta();
+      final meta = _ds.getHartMeta();
       return meta.map((r) => r['col_name'] as String).toList();
     }
     if (tableName == 'MODBUS') {
-      return ['name', 'byte_size', 'type_str', 'mb_point', 'address', 'formula'];
+      return [
+        'name',
+        'byte_size',
+        'type_str',
+        'mb_point',
+        'address',
+        'formula'
+      ];
     }
     return [];
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
-  Future<Map<String, Map<String, ReactVar>>> _getHartTable() async {
+  Map<String, Map<String, ReactVar>> _getHartTable() {
     final meta = {
-      for (final r in await _ds.getHartMeta())
-        r['col_name'] as String: (r['byte_size'] as int, r['type_str'] as String)
+      for (final r in _ds.getHartMeta())
+        r['col_name'] as String: (
+          r['byte_size'] as int,
+          r['type_str'] as String
+        )
     };
-    final data = await _ds.getHartData();
+    final data = _ds.getHartData();
     final result = <String, Map<String, ReactVar>>{};
     for (final row in data) {
       final device = row['device'] as String;
@@ -96,26 +106,31 @@ class DbRepositoryImpl implements IDbRepository {
     return result;
   }
 
-  Future<Map<String, Map<String, ReactVar>>> _getModbusTable() async {
-    final rows = await _ds.getModbusData();
+  Map<String, Map<String, ReactVar>> _getModbusTable() {
+    final rows = _ds.getModbusData();
     final result = <String, Map<String, ReactVar>>{};
     for (final row in rows) {
       final name = row['name'] as String;
       final rawValue = row['raw_value'] as String;
       result[name] = {
-        'name':      _makeVar('MODBUS', name, 'name',      1, 'PACKED_ASCII', name),
-        'byte_size': _makeVar('MODBUS', name, 'byte_size', 1, 'UNSIGNED',     '${row['byte_size']}'),
-        'type_str':  _makeVar('MODBUS', name, 'type_str',  8, 'PACKED_ASCII', row['type_str'] as String),
-        'mb_point':  _makeVar('MODBUS', name, 'mb_point',  2, 'PACKED_ASCII', row['mb_point'] as String),
-        'address':   _makeVar('MODBUS', name, 'address',   2, 'UNSIGNED',     row['address'] as String),
-        'formula':   _makeVar('MODBUS', name, 'formula',   32, 'PACKED_ASCII', rawValue),
+        'name': _makeVar('MODBUS', name, 'name', 1, 'PACKED_ASCII', name),
+        'byte_size': _makeVar(
+            'MODBUS', name, 'byte_size', 1, 'UNSIGNED', '${row['byte_size']}'),
+        'type_str': _makeVar('MODBUS', name, 'type_str', 8, 'PACKED_ASCII',
+            row['type_str'] as String),
+        'mb_point': _makeVar('MODBUS', name, 'mb_point', 2, 'PACKED_ASCII',
+            row['mb_point'] as String),
+        'address': _makeVar(
+            'MODBUS', name, 'address', 2, 'UNSIGNED', row['address'] as String),
+        'formula':
+            _makeVar('MODBUS', name, 'formula', 32, 'PACKED_ASCII', rawValue),
       };
     }
     return result;
   }
 
-  ReactVar _makeVar(String table, String row, String col,
-      int byteSize, String typeStr, String rawValue) {
+  ReactVar _makeVar(String table, String row, String col, int byteSize,
+      String typeStr, String rawValue) {
     return ReactVar(
       tableName: table,
       rowName: row,
@@ -133,49 +148,134 @@ class DbRepositoryImpl implements IDbRepository {
       for (final e in kHartTemplate.entries)
         e.key: (e.value.$1, e.value.$2, e.value.$3.first)
     };
-    await _ds.addHartDevice(deviceName, colMeta);
+    _ds.addHartDevice(deviceName, colMeta);
   }
 
   @override
-  Future<void> removeHartDevice(String deviceName) =>
+  Future<void> removeHartDevice(String deviceName) async =>
       _ds.removeHartDevice(deviceName);
 
   @override
-  Future<void> renameHartDevice(String oldName, String newName) =>
+  Future<void> renameHartDevice(String oldName, String newName) async =>
       _ds.renameHartDevice(oldName, newName);
 
   @override
-  Future<void> addHartColumn(String colName, int byteSize, String typeStr,
-      String defaultHex) async {
-    final devices = await _ds.getHartDevices();
-    await _ds.addHartColumn(colName, byteSize, typeStr, defaultHex, devices);
+  Future<void> addHartColumn(
+      String colName, int byteSize, String typeStr, String defaultHex) async {
+    final devices = _ds.getHartDevices();
+    _ds.addHartColumn(colName, byteSize, typeStr, defaultHex, devices);
   }
 
   @override
-  Future<void> removeHartColumn(String colName) =>
+  Future<void> removeHartColumn(String colName) async =>
       _ds.removeHartColumn(colName);
 
   @override
   Future<void> editHartColumn(String oldColName, String newColName,
-      int byteSize, String typeStr, String defaultHex) =>
+          int byteSize, String typeStr, String defaultHex) async =>
       _ds.editHartColumn(oldColName, newColName, byteSize, typeStr, defaultHex);
 
   // ── Modbus CRUD ─────────────────────────────────────────────────────────────
   @override
   Future<void> addModbusVariable(String name, int byteSize, String typeStr,
-      String mbPoint, String address, String formula) =>
+          String mbPoint, String address, String formula) async =>
       _ds.addModbusVariable(name, byteSize, typeStr, mbPoint, address, formula);
 
   @override
-  Future<void> removeModbusVariable(String name) =>
+  Future<void> removeModbusVariable(String name) async =>
       _ds.removeModbusVariable(name);
 
   @override
-  Future<void> editModbusVariable(String oldName, String newName, int byteSize,
-      String typeStr, String mbPoint, String address, String formula) =>
-      _ds.editModbusVariable(oldName, newName, byteSize, typeStr, mbPoint, address, formula);
+  Future<void> editModbusVariable(
+          String oldName,
+          String newName,
+          int byteSize,
+          String typeStr,
+          String mbPoint,
+          String address,
+          String formula) async =>
+      _ds.editModbusVariable(
+          oldName, newName, byteSize, typeStr, mbPoint, address, formula);
 
-  // ── Import ──────────────────────────────────────────────────────────────────
+  // ── HART ENUM CRUD ──────────────────────────────────────────────────────────
   @override
-  Future<int> importFromDb(String sourcePath) => _ds.importFromDb(sourcePath);
+  Map<int, Map<String, String>> getAllEnums() => _ds.getAllEnums();
+
+  @override
+  Map<String, String> getEnum(int enumIndex) => _ds.getEnum(enumIndex);
+
+  @override
+  List<int> getEnumIndices() => _ds.getEnumIndices();
+
+  @override
+  void addEnumEntry(int enumIndex, String hexKey, String description) =>
+      _ds.addEnumEntry(enumIndex, hexKey, description);
+
+  @override
+  void removeEnumEntry(int enumIndex, String hexKey) =>
+      _ds.removeEnumEntry(enumIndex, hexKey);
+
+  @override
+  void removeEnumGroup(int enumIndex) => _ds.removeEnumGroup(enumIndex);
+
+  @override
+  void updateEnumEntry(int enumIndex, String hexKey, String description) =>
+      _ds.updateEnumEntry(enumIndex, hexKey, description);
+
+  // ── HART BIT_ENUM CRUD ──────────────────────────────────────────────────────
+  @override
+  Map<int, Map<int, String>> getAllBitEnums() => _ds.getAllBitEnums();
+
+  @override
+  Map<int, String> getBitEnum(int bitEnumIndex) => _ds.getBitEnum(bitEnumIndex);
+
+  @override
+  List<int> getBitEnumIndices() => _ds.getBitEnumIndices();
+
+  @override
+  void addBitEnumEntry(int bitEnumIndex, int hexMask, String description) =>
+      _ds.addBitEnumEntry(bitEnumIndex, hexMask, description);
+
+  @override
+  void removeBitEnumEntry(int bitEnumIndex, int hexMask) =>
+      _ds.removeBitEnumEntry(bitEnumIndex, hexMask);
+
+  @override
+  void removeBitEnumGroup(int bitEnumIndex) =>
+      _ds.removeBitEnumGroup(bitEnumIndex);
+
+  @override
+  void updateBitEnumEntry(int bitEnumIndex, int hexMask, String description) =>
+      _ds.updateBitEnumEntry(bitEnumIndex, hexMask, description);
+
+  // ── HART COMMANDS CRUD ──────────────────────────────────────────────────────
+  @override
+  Map<String, Map<String, dynamic>> getAllCommands() => _ds.getAllCommands();
+
+  @override
+  Map<String, dynamic>? getCommand(String command) => _ds.getCommand(command);
+
+  @override
+  List<String> getCommandKeys() => _ds.getCommandKeys();
+
+  @override
+  void addCommand(String command, String description, List<String> req,
+          List<String> resp, List<String> write) =>
+      _ds.addCommand(command, description, req, resp, write);
+
+  @override
+  void updateCommand(String command, String description, List<String> req,
+          List<String> resp, List<String> write) =>
+      _ds.updateCommand(command, description, req, resp, write);
+
+  @override
+  void removeCommand(String command) => _ds.removeCommand(command);
+
+  // ── XLS Import / Export ─────────────────────────────────────────────────────
+  @override
+  Future<int> importFromXls(String sourcePath) async =>
+      _ds.importFromXls(sourcePath);
+
+  @override
+  Future<void> exportToXls(String destPath) async => _ds.exportToXls(destPath);
 }

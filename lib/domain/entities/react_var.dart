@@ -38,9 +38,18 @@ class ReactVar {
   String _evaluatedHex = '';
   String get evaluatedHex => _evaluatedHex.isEmpty ? _rawValue : _evaluatedHex;
 
+  /// Whether an evaluated value has been computed (for func/tFunc cells).
+  bool get hasEvaluated => _evaluatedHex.isNotEmpty;
+
   // ── Mutators ─────────────────────────────────────────────────────────────
   void setRawValue(String v) => _rawValue = v;
-  void setEvaluatedHex(String hex) => _evaluatedHex = hex;
+
+  /// Updates [evaluatedHex] and returns `true` only when the value changed.
+  bool setEvaluatedHex(String hex) {
+    if (_evaluatedHex == hex) return false;
+    _evaluatedHex = hex;
+    return true;
+  }
 
   // ── Expression helpers ───────────────────────────────────────────────────
   /// Expression body (without leading '@').

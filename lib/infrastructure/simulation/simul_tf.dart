@@ -94,7 +94,8 @@ class DiscreteSS {
 }
 
 /// Builds a discrete state-space system from transfer-function coefficients.
-DiscreteSS buildDiscreteSSFromTF(List<double> num, List<double> den, double Ts) {
+DiscreteSS buildDiscreteSSFromTF(
+    List<double> num, List<double> den, double Ts) {
   // Normalise by den[0]
   final a0 = den[0];
   final numN = num.map((v) => v / a0).toList();
@@ -129,8 +130,8 @@ DiscreteSS buildDiscreteSSFromTF(List<double> num, List<double> den, double Ts) 
   final Dc = numN.length > n ? numN[0] : 0.0;
 
   // Euler: Ad = I + Ts*Ac, Bd = Ts*Bc
-  final Ad = List.generate(n, (i) =>
-      List.generate(n, (j) => (i == j ? 1.0 : 0.0) + Ts * Ac[i][j]));
+  final Ad = List.generate(
+      n, (i) => List.generate(n, (j) => (i == j ? 1.0 : 0.0) + Ts * Ac[i][j]));
   final Bd = Bc.map((v) => Ts * v).toList();
 
   return DiscreteSS(A: Ad, B: Bd, C: Cc, D: Dc, Ts: Ts);
@@ -145,6 +146,9 @@ class SimulTf {
   final Map<String, _TFEntry> _entries = {};
   Timer? _timer;
   bool _running = false;
+
+  /// Called after a tick when at least one ReactVar actually changed.
+  void Function()? onChanged;
 
   SimulTf({this.stepMs = 50.0});
 
@@ -182,6 +186,7 @@ class SimulTf {
 
   // ── Tick ─────────────────────────────────────────────────────────────────
   void _tick(Timer _) {
+    bool anyChanged = false;
     for (final e in _entries.values) {
       double u = e.getInput();
       // Input normalisation (mirrors Python heuristic)
@@ -196,8 +201,9 @@ class SimulTf {
 
       // Back-convert to float hex and store in evaluatedHex
       final hexVal = HartTypeConverter.doubleToHex(y);
-      e.variable.setEvaluatedHex(hexVal);
+      if (e.variable.setEvaluatedHex(hexVal)) anyChanged = true;
     }
+    if (anyChanged) onChanged?.call();
   }
 }
 

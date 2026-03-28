@@ -9,15 +9,28 @@ import '../../infrastructure/hart/hart_type_converter.dart';
 class EditCellDialog extends StatefulWidget {
   final ReactVar variable;
   final bool showHuman;
+  final Map<String, String>? enumMap;
+  final Map<int, String>? bitEnumMap;
 
-  const EditCellDialog({super.key, required this.variable, required this.showHuman});
+  const EditCellDialog({
+    super.key,
+    required this.variable,
+    required this.showHuman,
+    this.enumMap,
+    this.bitEnumMap,
+  });
 
   /// Shows the dialog and returns the new raw value, or null if cancelled.
-  static Future<String?> show(
-      BuildContext context, ReactVar v, bool showHuman) {
+  static Future<String?> show(BuildContext context, ReactVar v, bool showHuman,
+      {Map<String, String>? enumMap, Map<int, String>? bitEnumMap}) {
     return showDialog<String>(
       context: context,
-      builder: (_) => EditCellDialog(variable: v, showHuman: showHuman),
+      builder: (_) => EditCellDialog(
+        variable: v,
+        showHuman: showHuman,
+        enumMap: enumMap,
+        bitEnumMap: bitEnumMap,
+      ),
     );
   }
 
@@ -37,14 +50,15 @@ class _EditCellDialogState extends State<EditCellDialog>
     super.initState();
     _tab = TabController(length: 3, vsync: this);
 
-    final v   = widget.variable;
+    final v = widget.variable;
     final hex = v.evaluatedHex.isEmpty ? v.rawValue : v.evaluatedHex;
-    final humanVal = HartTypeConverter.hexToHuman(hex, v.typeStr);
+    final humanVal = HartTypeConverter.hexToHuman(hex, v.typeStr,
+        enumMap: widget.enumMap, bitEnumMap: widget.bitEnumMap);
 
     _valueCtrl = TextEditingController(
       text: widget.showHuman ? humanVal : hex,
     );
-    _funcCtrl  = TextEditingController(
+    _funcCtrl = TextEditingController(
       text: v.model == DbModel.func ? v.funcBody : '',
     );
     _tfuncCtrl = TextEditingController(
@@ -53,9 +67,9 @@ class _EditCellDialogState extends State<EditCellDialog>
 
     // Pre-select the correct tab
     _tab.index = switch (v.model) {
-      DbModel.func  => 1,
+      DbModel.func => 1,
       DbModel.tFunc => 2,
-      _             => 0,
+      _ => 0,
     };
   }
 
@@ -75,7 +89,8 @@ class _EditCellDialogState extends State<EditCellDialog>
       case 0: // plain value
         final text = _valueCtrl.text.trim();
         if (widget.showHuman) {
-          result = HartTypeConverter.humanToHex(text, v.typeStr, v.byteSize);
+          result = HartTypeConverter.humanToHex(text, v.typeStr, v.byteSize,
+              enumMap: widget.enumMap, bitEnumMap: widget.bitEnumMap);
         } else {
           result = text.toUpperCase();
         }
@@ -112,13 +127,14 @@ class _EditCellDialogState extends State<EditCellDialog>
                         Text(
                           '${v.rowName} › ${v.colName}',
                           style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 15,
-                            color: AppColors.textPrimary),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              color: AppColors.textPrimary),
                         ),
                         Text(
                           '${v.typeStr} · ${v.byteSize} byte${v.byteSize > 1 ? "s" : ""}',
-                          style: const TextStyle(fontSize: 11,
-                              color: AppColors.textSecondary),
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textSecondary),
                         ),
                       ],
                     ),
@@ -142,14 +158,18 @@ class _EditCellDialogState extends State<EditCellDialog>
               labelColor: AppColors.primaryLight,
               unselectedLabelColor: AppColors.textSecondary,
               indicatorColor: AppColors.primary,
-              labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              labelStyle:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
             // ── Tab content ────────────────────────────────────────────
             Expanded(
               child: TabBarView(
                 controller: _tab,
                 children: [
-                  _ValueTab(ctrl: _valueCtrl, variable: v, showHuman: widget.showHuman),
+                  _ValueTab(
+                      ctrl: _valueCtrl,
+                      variable: v,
+                      showHuman: widget.showHuman),
                   _FuncTab(ctrl: _funcCtrl),
                   _TFuncTab(ctrl: _tfuncCtrl),
                 ],
@@ -182,9 +202,9 @@ class _EditCellDialogState extends State<EditCellDialog>
 
   Widget _typeChip(DbModel model) {
     final (label, color) = switch (model) {
-      DbModel.func  => ('Function', AppColors.cellFunc),
+      DbModel.func => ('Function', AppColors.cellFunc),
       DbModel.tFunc => ('TF Sim', AppColors.cellTFunc),
-      _             => ('Value', AppColors.cellValue),
+      _ => ('Value', AppColors.cellValue),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -194,7 +214,9 @@ class _EditCellDialogState extends State<EditCellDialog>
         border: Border.all(color: Colors.white12),
       ),
       child: Text(label,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+          style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
               color: Colors.white70)),
     );
   }
@@ -206,8 +228,8 @@ class _ValueTab extends StatelessWidget {
   final TextEditingController ctrl;
   final ReactVar variable;
   final bool showHuman;
-  const _ValueTab({required this.ctrl, required this.variable,
-      required this.showHuman});
+  const _ValueTab(
+      {required this.ctrl, required this.variable, required this.showHuman});
 
   @override
   Widget build(BuildContext context) {
@@ -220,14 +242,16 @@ class _ValueTab extends StatelessWidget {
             showHuman
                 ? 'Enter engineering value (${variable.typeStr})'
                 : 'Enter hex value (${variable.byteSize * 2} hex chars)',
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: ctrl,
             autofocus: true,
             style: const TextStyle(
-              fontFamily: 'monospace', fontSize: 14,
+              fontFamily: 'monospace',
+              fontSize: 14,
               color: AppColors.textPrimary,
             ),
             decoration: InputDecoration(
@@ -267,7 +291,9 @@ class _FuncTab extends StatelessWidget {
             controller: ctrl,
             autofocus: true,
             maxLines: 4,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13,
+            style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
                 color: AppColors.textPrimary),
             decoration: const InputDecoration(
               hintText: 'e.g. HART.FIT100CA.percent_of_range * 100',
@@ -285,14 +311,20 @@ class _FuncTab extends StatelessWidget {
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('References:', style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w600, color: AppColors.primaryLight)),
+                Text('References:',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryLight)),
                 SizedBox(height: 4),
                 Text('HART.DEVICE.column   →  float value',
-                    style: TextStyle(fontSize: 11, fontFamily: 'monospace',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
                         color: AppColors.textSecondary)),
                 Text('Operators: + - * / ( )',
-                    style: TextStyle(fontSize: 11, color: AppColors.textDisabled)),
+                    style:
+                        TextStyle(fontSize: 11, color: AppColors.textDisabled)),
               ],
             ),
           ),
@@ -321,7 +353,9 @@ class _TFuncTab extends StatelessWidget {
           TextField(
             controller: ctrl,
             autofocus: true,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13,
+            style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
                 color: AppColors.textPrimary),
             decoration: const InputDecoration(
               hintText: r'[1],[1,2,1],0.1,x',
@@ -339,20 +373,29 @@ class _TFuncTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Format:  \$[num],[den],delay,input',
-                    style: TextStyle(fontSize: 11, fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600, color: AppColors.primaryLight)),
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryLight)),
                 SizedBox(height: 6),
                 Text('[num]   numerator coefficients',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textSecondary)),
                 Text('[den]   denominator coefficients',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textSecondary)),
                 Text('delay   pure time delay (seconds)',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textSecondary)),
                 Text('input   expression or "x" for percent_of_range',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textSecondary)),
                 SizedBox(height: 6),
                 Text('Example: [1],[1,2,1],0.2,x  →  2nd-order, delay=0.2s',
-                    style: TextStyle(fontSize: 11, fontFamily: 'monospace',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
                         color: AppColors.textDisabled)),
               ],
             ),

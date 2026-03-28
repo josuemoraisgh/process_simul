@@ -1,18 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'app.dart';
 import 'application/providers/app_providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // sqflite_common_ffi is required for Windows / Linux / macOS desktop.
-  if (!Platform.isAndroid && !Platform.isIOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
 
   // Create a ProviderContainer to initialise services before first frame.
   final container = ProviderContainer();

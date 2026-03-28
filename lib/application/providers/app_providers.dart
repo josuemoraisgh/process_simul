@@ -8,6 +8,7 @@ import '../notifiers/settings_notifier.dart';
 import '../notifiers/connection_notifier.dart';
 import '../notifiers/log_notifier.dart';
 import '../notifiers/modbus_table_notifier.dart';
+import '../notifiers/custom_types_notifier.dart';
 
 // ── Infrastructure singletons ───────────────────────────────────────────────
 final sqliteDatasourceProvider = Provider<SqliteDatasource>(
@@ -18,13 +19,13 @@ final dbRepositoryProvider = Provider<IDbRepository>((ref) {
   return DbRepositoryImpl(ref.watch(sqliteDatasourceProvider));
 });
 
-final simulTfProvider = Provider<SimulTf>(
-  (_) => SimulTf(stepMs: 50),
-);
+final simulTfProvider = Provider<SimulTf>((ref) {
+  final stepMs = ref.watch(settingsProvider).tfStepMs;
+  return SimulTf(stepMs: stepMs.toDouble());
+});
 
 // ── Settings ────────────────────────────────────────────────────────────────
-final settingsProvider =
-    StateNotifierProvider<SettingsNotifier, AppSettings>(
+final settingsProvider = StateNotifierProvider<SettingsNotifier, AppSettings>(
   (_) => SettingsNotifier(),
 );
 
@@ -44,8 +45,7 @@ final connectionProvider =
 );
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
-final logProvider =
-    StateNotifierProvider<LogNotifier, List<LogEntry>>((ref) {
+final logProvider = StateNotifierProvider<LogNotifier, List<LogEntry>>((ref) {
   final notifier = LogNotifier();
   initGlobalLog(notifier);
   return notifier;
@@ -55,4 +55,9 @@ final logProvider =
 final modbusTableProvider =
     StateNotifierProvider<ModbusTableNotifier, ModbusTableState>((ref) {
   return ModbusTableNotifier(ref.watch(dbRepositoryProvider));
+});
+// ── Custom types (ENUM / BIT_ENUM) ───────────────────────────────────────
+final customTypesProvider =
+    StateNotifierProvider<CustomTypesNotifier, CustomTypesState>((ref) {
+  return CustomTypesNotifier(ref.watch(dbRepositoryProvider));
 });

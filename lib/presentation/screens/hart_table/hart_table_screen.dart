@@ -4,6 +4,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../application/providers/app_providers.dart';
 import '../../../application/notifiers/hart_table_notifier.dart';
 import '../../../domain/enums/db_model.dart';
+import '../../../infrastructure/hart/hart_type_converter.dart';
 import '../../dialogs/edit_cell_dialog.dart';
 import '../../dialogs/add_device_dialog.dart';
 import '../../dialogs/add_column_dialog.dart';
@@ -422,9 +423,7 @@ class _HartTableState extends ConsumerState<_HartTable> {
                           letterSpacing: 1)),
                   const SizedBox(width: 4),
                   Icon(
-                    widget.sortAsc
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward,
+                    widget.sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
                     size: 12,
                     color: AppColors.textDisabled,
                   ),
@@ -494,6 +493,7 @@ class _HartTableState extends ConsumerState<_HartTable> {
                     thumbVisibility: true,
                     child: Consumer(builder: (ctx, ref, _) {
                       final state = ref.watch(hartTableProvider);
+                      final notifier = ref.read(hartTableProvider.notifier);
                       return ListView.builder(
                         controller: _vCtrl,
                         itemCount: devices.length,
@@ -504,6 +504,7 @@ class _HartTableState extends ConsumerState<_HartTable> {
                             device: device,
                             cols: state.visibleCols,
                             state: state,
+                            notifier: notifier,
                             colW: _colW,
                             height: _rowH,
                             index: i,
@@ -527,7 +528,21 @@ class _HartTableState extends ConsumerState<_HartTable> {
       HartTableState state) async {
     final v = state.data[device]?[col];
     if (v == null) return;
-    final newVal = await EditCellDialog.show(context, v, state.showHuman);
+
+    // Resolve enum/bitenum maps for this cell's type
+    Map<String, String>? enumMap;
+    Map<int, String>? bitEnumMap;
+    final t = v.typeStr.toUpperCase();
+    if (t.contains('BIT_ENUM')) {
+      final idx = HartTypeConverter.parseBitEnumIndex(t);
+      if (idx >= 0) bitEnumMap = state.bitEnumMaps[idx];
+    } else if (t.contains('ENUM')) {
+      final idx = HartTypeConverter.parseEnumIndex(t);
+      if (idx >= 0) enumMap = state.enumMaps[idx];
+    }
+
+    final newVal = await EditCellDialog.show(context, v, state.showHuman,
+        enumMap: enumMap, bitEnumMap: bitEnumMap);
     if (newVal != null) {
       await ref
           .read(hartTableProvider.notifier)
@@ -635,6 +650,7 @@ class _DataRow extends StatelessWidget {
   final String device;
   final List<String> cols;
   final HartTableState state;
+  final HartTableNotifier notifier;
   final double colW;
   final double height;
   final int index;
@@ -644,6 +660,7 @@ class _DataRow extends StatelessWidget {
     required this.device,
     required this.cols,
     required this.state,
+    required this.notifier,
     required this.colW,
     required this.height,
     required this.index,
@@ -659,9 +676,8 @@ class _DataRow extends StatelessWidget {
       child: Row(
         children: cols.map((col) {
           final model = state.cellModel(device, col);
-          final display = state.cellDisplay(device, col);
           return _DataCell(
-            display: display,
+            cellNotifier: notifier.cellNotifier(device, col),
             model: model,
             width: colW,
             height: height,
@@ -675,7 +691,7 @@ class _DataRow extends StatelessWidget {
 }
 
 class _DataCell extends StatelessWidget {
-  final String display;
+  final ValueNotifier<String> cellNotifier;
   final DbModel model;
   final double width;
   final double height;
@@ -683,7 +699,7 @@ class _DataCell extends StatelessWidget {
   final VoidCallback onDoubleTap;
 
   const _DataCell({
-    required this.display,
+    required this.cellNotifier,
     required this.model,
     required this.width,
     required this.height,
@@ -701,39 +717,46 @@ class _DataCell extends StatelessWidget {
 
     return GestureDetector(
       onDoubleTap: onDoubleTap,
-      child: Tooltip(
-        message: display,
-        waitDuration: const Duration(milliseconds: 600),
-        child: Container(
-          width: width,
-          height: height,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
-            color: cellBg,
-            border: const Border(
-              right: BorderSide(color: AppColors.borderDark, width: 0.5),
-              bottom: BorderSide(color: AppColors.borderDark, width: 0.3),
+      child: ValueListenableBuilder<String>(
+        valueListenable: cellNotifier,
+        builder: (context, display, _) {
+          return Tooltip(
+            message: display,
+            waitDuration: const Duration(milliseconds: 600),
+            child: Container(
+              width: width,
+              height: height,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: cellBg,
+                border: const Border(
+                  right: BorderSide(color: AppColors.borderDark, width: 0.5),
+                  bottom: BorderSide(color: AppColors.borderDark, width: 0.3),
+                ),
+              ),
+              alignment: Alignment.centerLeft,
+              child: Row(children: [
+                if (prefix.isNotEmpty) ...[
+                  Text(prefix,
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: textColor,
+                          fontWeight: FontWeight.w800)),
+                  const SizedBox(width: 2),
+                ],
+                Expanded(
+                  child: Text(display,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: textColor,
+                          fontFamily: 'monospace')),
+                ),
+              ]),
             ),
-          ),
-          alignment: Alignment.centerLeft,
-          child: Row(children: [
-            if (prefix.isNotEmpty) ...[
-              Text(prefix,
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: textColor,
-                      fontWeight: FontWeight.w800)),
-              const SizedBox(width: 2),
-            ],
-            Expanded(
-              child: Text(display,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12, color: textColor, fontFamily: 'monospace')),
-            ),
-          ]),
-        ),
+          );
+        },
       ),
     );
   }
