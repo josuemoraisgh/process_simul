@@ -141,6 +141,10 @@ class DbRepositoryImpl implements IDbRepository {
       _ds.removeHartDevice(deviceName);
 
   @override
+  Future<void> renameHartDevice(String oldName, String newName) =>
+      _ds.renameHartDevice(oldName, newName);
+
+  @override
   Future<void> addHartColumn(String colName, int byteSize, String typeStr,
       String defaultHex) async {
     final devices = await _ds.getHartDevices();
@@ -151,6 +155,11 @@ class DbRepositoryImpl implements IDbRepository {
   Future<void> removeHartColumn(String colName) =>
       _ds.removeHartColumn(colName);
 
+  @override
+  Future<void> editHartColumn(String oldColName, String newColName,
+      int byteSize, String typeStr, String defaultHex) =>
+      _ds.editHartColumn(oldColName, newColName, byteSize, typeStr, defaultHex);
+
   // ── Modbus CRUD ─────────────────────────────────────────────────────────────
   @override
   Future<void> addModbusVariable(String name, int byteSize, String typeStr,
@@ -160,6 +169,11 @@ class DbRepositoryImpl implements IDbRepository {
   @override
   Future<void> removeModbusVariable(String name) =>
       _ds.removeModbusVariable(name);
+
+  @override
+  Future<void> editModbusVariable(String oldName, String newName, int byteSize,
+      String typeStr, String mbPoint, String address, String formula) =>
+      _ds.editModbusVariable(oldName, newName, byteSize, typeStr, mbPoint, address, formula);
 
   // ── Import ──────────────────────────────────────────────────────────────────
   @override

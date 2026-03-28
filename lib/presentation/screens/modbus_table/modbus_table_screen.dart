@@ -47,7 +47,11 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
 
     return Column(children: [
       // ── Toolbar ──────────────────────────────────────────────────────────
-      _ModbusToolbar(onAdd: () => _addVariable(context), onRemove: () => _removeVariable(context, rows)),
+      _ModbusToolbar(
+        onAdd:    () => _addVariable(context),
+        onEdit:   () => _editVariable(context, rows),
+        onRemove: () => _removeVariable(context, rows),
+      ),
       // ── Header ──────────────────────────────────────────────────────────
       Container(
         height: 36,
@@ -130,6 +134,40 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
     );
   }
 
+  Future<void> _editVariable(BuildContext ctx,
+      List<MapEntry<String, (int, String, String, String, String)>> rows) async {
+    if (rows.isEmpty) return;
+    String? selected = rows.first.key;
+    // Step 1 – pick which variable to edit
+    final pick = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => _RemoveVariableDialog(
+        items: rows.map((e) => e.key).toList(),
+        selectedValue: selected,
+        onChanged: (v) => selected = v,
+        confirmLabel: 'Next',
+        confirmColor: AppColors.accent,
+      ),
+    );
+    if (pick != true || selected == null) return;
+    if (!ctx.mounted) return;
+    final oldName = selected!;
+    final current = rows.firstWhere((e) => e.key == oldName).value;
+    // Step 2 – open pre-filled edit dialog
+    final spec = await _AddModbusVariableDialog.show(ctx, initial: (
+      oldName,
+      current.$1,
+      current.$2,
+      current.$3,
+      current.$4,
+      current.$5,
+    ));
+    if (spec == null) return;
+    await ref.read(modbusTableProvider.notifier).editVariable(
+      oldName, spec.$1, spec.$2, spec.$3, spec.$4, spec.$5, spec.$6,
+    );
+  }
+
   Future<void> _removeVariable(BuildContext ctx,
       List<MapEntry<String, (int, String, String, String, String)>> rows) async {
     if (rows.isEmpty) return;
@@ -151,8 +189,10 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
 // ── Toolbar ───────────────────────────────────────────────────────────────────
 class _ModbusToolbar extends StatelessWidget {
   final VoidCallback onAdd;
+  final VoidCallback onEdit;
   final VoidCallback onRemove;
-  const _ModbusToolbar({required this.onAdd, required this.onRemove});
+  const _ModbusToolbar(
+      {required this.onAdd, required this.onEdit, required this.onRemove});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -167,19 +207,11 @@ class _ModbusToolbar extends StatelessWidget {
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
                   color: AppColors.textSecondary)),
           const SizedBox(width: 6),
-          _ToolBtn(
-            icon: Icons.add,
-            label: 'Add',
-            color: AppColors.success,
-            onTap: onAdd,
-          ),
+          _ToolBtn(icon: Icons.add,    label: 'Add',    color: AppColors.success, onTap: onAdd),
           const SizedBox(width: 4),
-          _ToolBtn(
-            icon: Icons.remove,
-            label: 'Remove',
-            color: AppColors.error,
-            onTap: onRemove,
-          ),
+          _ToolBtn(icon: Icons.edit,   label: 'Edit',   color: AppColors.accent,  onTap: onEdit),
+          const SizedBox(width: 4),
+          _ToolBtn(icon: Icons.remove, label: 'Remove', color: AppColors.error,   onTap: onRemove),
           const Spacer(),
         ]),
       );
@@ -356,16 +388,20 @@ class _Cell extends StatelessWidget {
       );
 }
 
-// ── Add variable dialog ───────────────────────────────────────────────────────
+// ── Add / Edit variable dialog ────────────────────────────────────────────────
 class _AddModbusVariableDialog extends StatefulWidget {
-  const _AddModbusVariableDialog();
+  /// When non-null, the dialog opens in edit mode with fields pre-filled.
+  /// Tuple: (name, byteSize, typeStr, mbPoint, address, formula)
+  final (String, int, String, String, String, String)? initial;
+  const _AddModbusVariableDialog({this.initial});
 
   /// Returns (name, byteSize, typeStr, mbPoint, address, formula) or null.
   static Future<(String, int, String, String, String, String)?> show(
-      BuildContext context) =>
+      BuildContext context,
+      {(String, int, String, String, String, String)? initial}) =>
       showDialog<(String, int, String, String, String, String)>(
           context: context,
-          builder: (_) => const _AddModbusVariableDialog());
+          builder: (_) => _AddModbusVariableDialog(initial: initial));
 
   @override
   State<_AddModbusVariableDialog> createState() =>
@@ -373,15 +409,30 @@ class _AddModbusVariableDialog extends StatefulWidget {
 }
 
 class _AddModbusVariableDialogState extends State<_AddModbusVariableDialog> {
-  final _nameCtrl    = TextEditingController();
-  final _bytesCtrl   = TextEditingController(text: '4');
-  final _addrCtrl    = TextEditingController(text: '01');
-  final _formulaCtrl = TextEditingController();
-  String _typeStr    = 'UNSIGNED';
-  String _mbPoint    = 'ir';
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _bytesCtrl;
+  late final TextEditingController _addrCtrl;
+  late final TextEditingController _formulaCtrl;
+  late String _typeStr;
+  late String _mbPoint;
+  bool get _isEdit => widget.initial != null;
 
-  static const _types   = ['UNSIGNED', 'INTEGER', 'FLOAT', 'PACKED_ASCII'];
+  static const _types    = ['UNSIGNED', 'INTEGER', 'FLOAT', 'PACKED_ASCII'];
   static const _mbPoints = ['ir', 'hr', 'di', 'co'];
+
+  @override
+  void initState() {
+    super.initState();
+    final init = widget.initial;
+    _nameCtrl    = TextEditingController(text: init?.$1 ?? '');
+    _bytesCtrl   = TextEditingController(text: (init?.$2 ?? 4).toString());
+    _typeStr     = init?.$3 ?? 'UNSIGNED';
+    _mbPoint     = init?.$4 ?? 'ir';
+    _addrCtrl    = TextEditingController(text: init?.$5 ?? '01');
+    _formulaCtrl = TextEditingController(text: init?.$6 ?? '');
+    if (!_types.contains(_typeStr)) _typeStr = 'UNSIGNED';
+    if (!_mbPoints.contains(_mbPoint)) _mbPoint = 'ir';
+  }
 
   @override
   void dispose() {
@@ -394,14 +445,17 @@ class _AddModbusVariableDialogState extends State<_AddModbusVariableDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Add Modbus Variable'),
+        title: Text(_isEdit ? 'Edit Modbus Variable' : 'Add Modbus Variable'),
         content: SizedBox(
           width: 380,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: _nameCtrl,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Variable name'),
+              decoration: InputDecoration(
+                labelText: 'Variable name',
+                prefixIcon: Icon(_isEdit ? Icons.edit : Icons.add, size: 16),
+              ),
             ),
             const SizedBox(height: 10),
             Row(children: [
@@ -468,8 +522,8 @@ class _AddModbusVariableDialogState extends State<_AddModbusVariableDialog> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel')),
           ElevatedButton.icon(
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('Add'),
+            icon: Icon(_isEdit ? Icons.save : Icons.add, size: 16),
+            label: Text(_isEdit ? 'Save' : 'Add'),
             onPressed: _submit,
           ),
         ],
@@ -487,14 +541,18 @@ class _AddModbusVariableDialogState extends State<_AddModbusVariableDialog> {
 
 // ── Remove variable dialog ────────────────────────────────────────────────────
 class _RemoveVariableDialog extends StatefulWidget {
-  final List<String>      items;
-  final String?           selectedValue;
+  final List<String>          items;
+  final String?               selectedValue;
   final ValueChanged<String?> onChanged;
+  final String                confirmLabel;
+  final Color                 confirmColor;
 
   const _RemoveVariableDialog({
     required this.items,
     required this.selectedValue,
     required this.onChanged,
+    this.confirmLabel = 'Remove',
+    this.confirmColor = AppColors.error,
   });
 
   @override
@@ -512,7 +570,9 @@ class _RemoveVariableDialogState extends State<_RemoveVariableDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Remove Modbus Variable'),
+        title: Text(widget.confirmLabel == 'Remove'
+            ? 'Remove Modbus Variable'
+            : 'Select Variable to Edit'),
         content: DropdownButton<String>(
           value: _selected,
           isExpanded: true,
@@ -530,9 +590,9 @@ class _RemoveVariableDialogState extends State<_RemoveVariableDialog> {
               child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error),
+                backgroundColor: widget.confirmColor),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+            child: Text(widget.confirmLabel),
           ),
         ],
       );

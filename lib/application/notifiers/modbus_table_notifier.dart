@@ -66,4 +66,11 @@ class ModbusTableNotifier extends StateNotifier<ModbusTableState> {
     await _repo.removeModbusVariable(name);
     await load();
   }
+
+  Future<void> editVariable(String oldName, String newName, int byteSize,
+      String typeStr, String mbPoint, String address, String formula) async {
+    await _repo.editModbusVariable(
+        oldName, newName, byteSize, typeStr, mbPoint, address, formula);
+    await load();
+  }
 }

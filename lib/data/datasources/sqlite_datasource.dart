@@ -166,6 +166,37 @@ class SqliteDatasource {
     return rows.map((r) => r['device'] as String).toList();
   }
 
+  Future<void> renameHartDevice(String oldName, String newName) =>
+      db.update('hart_data', {'device': newName},
+          where: 'device=?', whereArgs: [oldName]);
+
+  Future<void> editHartColumn(String oldColName, String newColName,
+      int byteSize, String typeStr, String defaultHex) async {
+    await db.update('hart_meta',
+        {'col_name': newColName, 'byte_size': byteSize, 'type_str': typeStr},
+        where: 'col_name=?', whereArgs: [oldColName]);
+    if (oldColName != newColName) {
+      await db.update('hart_data', {'col': newColName},
+          where: 'col=?', whereArgs: [oldColName]);
+    }
+    if (defaultHex.isNotEmpty) {
+      await db.update('hart_data', {'raw_value': defaultHex},
+          where: 'col=?', whereArgs: [newColName]);
+    }
+  }
+
+  Future<void> editModbusVariable(String oldName, String newName, int byteSize,
+      String typeStr, String mbPoint, String address, String formula) =>
+      db.update('modbus_data', {
+        'name':      newName,
+        'byte_size': byteSize,
+        'type_str':  typeStr,
+        'mb_point':  mbPoint,
+        'address':   address,
+        'formula':   formula,
+        'raw_value': formula,
+      }, where: 'name=?', whereArgs: [oldName]);
+
   // ── Modbus CRUD ─────────────────────────────────────────────────────────────
   Future<void> addModbusVariable(String name, int byteSize, String typeStr,
       String mbPoint, String address, String formula) =>
@@ -261,10 +292,21 @@ class SqliteDatasource {
   // Python HART_tabela: transposed — rows are columns (NAME=col_name),
   // each device is a separate TEXT column.
   // Python MODBUS_tabela: NAME, BYTE_SIZE, TYPE, MB_POINT, ADDRESS, CLP100
-  static const _pythonDevices = [
-    'FV100CA', 'FIT100CA', 'FV100AR', 'FIT100AR', 'TIT100',
-    'FIT100V', 'PIT100V',  'LIT100',  'PIT100A',  'FV100A',  'FIT100A',
-  ];
+  static const _hartMetaCols = {'NAME', 'BYTE_SIZE', 'TYPE'};
+
+  /// Reads the actual device column names from HART_tabela's schema (PRAGMA),
+  /// so we never miss a device that isn't in the hardcoded list.
+  Future<List<String>> _detectPythonDevices(Database srcDb) async {
+    try {
+      final rows = await srcDb.rawQuery('PRAGMA table_info(HART_tabela)');
+      return rows
+          .map((r) => r['name'] as String)
+          .where((name) => !_hartMetaCols.contains(name.toUpperCase()))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
 
   Future<int> _importPythonSchema(Database srcDb) async {
     int count = 0;
@@ -272,13 +314,17 @@ class SqliteDatasource {
     // ── HART ────────────────────────────────────────────────────────────────
     final hartRows = await _safeQuery(srcDb, 'HART_tabela');
     if (hartRows != null && hartRows.isNotEmpty) {
+      // Detect ALL device columns from the actual schema (not a hardcoded list)
+      final deviceCols = await _detectPythonDevices(srcDb);
+
       final metaBatch = db.batch();
       final dataBatch = db.batch();
       metaBatch.delete('hart_meta');
       dataBatch.delete('hart_data');
 
       for (final r in hartRows) {
-        final colName  = (r['NAME'] as String?)?.toLowerCase() ?? '';
+        // Preserve original case from NAME column — do NOT lowercase
+        final colName  = (r['NAME'] as String?) ?? '';
         final byteSize = int.tryParse(r['BYTE_SIZE']?.toString() ?? '') ?? 1;
         final typeStr  = (r['TYPE'] as String?) ?? 'UNSIGNED';
 
@@ -290,8 +336,7 @@ class SqliteDatasource {
           'type_str':  typeStr,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
 
-        for (final dev in _pythonDevices) {
-          // The Python DB uses uppercase device names as column names
+        for (final dev in deviceCols) {
           final rawVal = r[dev]?.toString() ?? '00';
           dataBatch.insert('hart_data', {
             'device':    dev,

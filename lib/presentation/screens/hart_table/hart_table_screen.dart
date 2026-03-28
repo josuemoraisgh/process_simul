@@ -67,6 +67,13 @@ class _HartToolbar extends ConsumerWidget {
         ),
         const SizedBox(width: 4),
         _ToolBtn(
+          icon: Icons.edit,
+          label: 'Edit',
+          color: AppColors.accent,
+          onTap: () => _editDevice(context, ref, state),
+        ),
+        const SizedBox(width: 4),
+        _ToolBtn(
           icon: Icons.remove,
           label: 'Remove',
           color: AppColors.error,
@@ -81,6 +88,13 @@ class _HartToolbar extends ConsumerWidget {
           label: 'Add',
           color: AppColors.success,
           onTap: () => _addColumn(context, ref),
+        ),
+        const SizedBox(width: 4),
+        _ToolBtn(
+          icon: Icons.edit,
+          label: 'Edit',
+          color: AppColors.accent,
+          onTap: () => _editColumn(context, ref, state),
         ),
         const SizedBox(width: 4),
         _ToolBtn(
@@ -103,6 +117,33 @@ class _HartToolbar extends ConsumerWidget {
     if (name != null && name.isNotEmpty) {
       await ref.read(hartTableProvider.notifier).addDevice(name.toUpperCase());
     }
+  }
+
+  Future<void> _editDevice(
+      BuildContext ctx, WidgetRef ref, HartTableState state) async {
+    if (state.devices.isEmpty) return;
+    // Step 1 – pick which device to edit
+    String? selected = state.devices.first;
+    final pick = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => _RemoveDialog(
+        title: 'Edit Instrument – select',
+        items: state.devices,
+        selectedValue: selected,
+        onChanged: (v) => selected = v,
+        confirmLabel: 'Next',
+        confirmColor: AppColors.accent,
+      ),
+    );
+    if (pick != true || selected == null) return;
+    if (!ctx.mounted) return;
+    final oldName = selected!;
+    // Step 2 – rename
+    final newName = await AddDeviceDialog.show(ctx, initialName: oldName);
+    if (newName == null || newName.trim().isEmpty || newName == oldName) return;
+    await ref
+        .read(hartTableProvider.notifier)
+        .editDevice(oldName, newName.toUpperCase());
   }
 
   Future<void> _removeDevice(
@@ -130,6 +171,47 @@ class _HartToolbar extends ConsumerWidget {
           .read(hartTableProvider.notifier)
           .addColumn(spec.$1, spec.$2, spec.$3, spec.$4);
     }
+  }
+
+  Future<void> _editColumn(
+      BuildContext ctx, WidgetRef ref, HartTableState state) async {
+    if (state.visibleCols.isEmpty) return;
+    // Step 1 – pick which column to edit
+    String? selected = state.visibleCols.first;
+    final pick = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => _RemoveDialog(
+        title: 'Edit Variable – select',
+        items: state.visibleCols,
+        selectedValue: selected,
+        onChanged: (v) => selected = v,
+        confirmLabel: 'Next',
+        confirmColor: AppColors.accent,
+      ),
+    );
+    if (pick != true || selected == null) return;
+    if (!ctx.mounted) return;
+    final colName = selected!;
+    // Step 2 – get current meta for the selected column
+    final meta = state.data.values
+        .expand((m) => m.entries)
+        .where((e) => e.key == colName)
+        .map((e) => e.value)
+        .firstOrNull;
+    final currentHex = meta?.rawValue ?? '00000000';
+    final initial = (
+      colName,
+      meta?.byteSize ?? 4,
+      meta?.typeStr ?? 'FLOAT',
+      currentHex.startsWith('@') || currentHex.startsWith(r'$')
+          ? '00000000'
+          : currentHex,
+    );
+    final spec = await AddColumnDialog.show(ctx, initial: initial);
+    if (spec == null) return;
+    await ref
+        .read(hartTableProvider.notifier)
+        .editColumn(colName, spec.$1, spec.$2, spec.$3, spec.$4);
   }
 
   Future<void> _removeColumn(
@@ -563,18 +645,22 @@ class _Sep extends StatelessWidget {
         color: AppColors.borderDark);
 }
 
-// ── Remove dialog (shared for device and column) ──────────────────────────────
+// ── Remove / Select dialog (shared for device and column) ────────────────────
 class _RemoveDialog extends StatefulWidget {
   final String            title;
   final List<String>      items;
   final String?           selectedValue;
   final ValueChanged<String?> onChanged;
+  final String            confirmLabel;
+  final Color             confirmColor;
 
   const _RemoveDialog({
     required this.title,
     required this.items,
     required this.selectedValue,
     required this.onChanged,
+    this.confirmLabel = 'Remove',
+    this.confirmColor = AppColors.error,
   });
 
   @override
@@ -610,9 +696,9 @@ class _RemoveDialogState extends State<_RemoveDialog> {
               child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error),
+                backgroundColor: widget.confirmColor),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+            child: Text(widget.confirmLabel),
           ),
         ],
       );

@@ -190,16 +190,48 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
     await load();
   }
 
+  Future<void> editDevice(String oldName, String newName) async {
+    await _repo.renameHartDevice(oldName, newName);
+    await load();
+  }
+
+  Future<void> editColumn(String oldName, String newName,
+      int byteSize, String typeStr, String defaultHex) async {
+    await _repo.editHartColumn(oldName, newName, byteSize, typeStr, defaultHex);
+    await load();
+  }
+
   // ── Column helpers ─────────────────────────────────────────────────────────
+  /// Returns ALL columns from [all], with the preferred key-columns first
+  /// (case-insensitive match), followed by the remaining columns in order.
   static List<String> _visibleSubset(List<String> all) {
     const preferred = [
       'error_code', 'device_status', 'polling_address',
       'tag', 'message', 'descriptor', 'date',
-      'PROCESS_VARIABLE', 'percent_of_range', 'loop_current',
+      'PROCESS_VARIABLE', 'process_variable',
+      'percent_of_range', 'loop_current',
       'upper_range_value', 'lower_range_value', 'process_variable_unit_code',
     ];
-    final available = all.toSet();
-    return preferred.where(available.contains).toList();
+    final preferredLower = preferred.map((p) => p.toLowerCase()).toSet();
+    final result = <String>[];
+    final rest   = <String>[];
+
+    for (final col in all) {
+      if (preferredLower.contains(col.toLowerCase())) {
+        result.add(col);
+      } else {
+        rest.add(col);
+      }
+    }
+
+    // Sort result in preferred order (case-insensitive)
+    result.sort((a, b) {
+      final ai = preferredLower.toList().indexOf(a.toLowerCase());
+      final bi = preferredLower.toList().indexOf(b.toLowerCase());
+      return ai.compareTo(bi);
+    });
+
+    return [...result, ...rest];
   }
 
   @override

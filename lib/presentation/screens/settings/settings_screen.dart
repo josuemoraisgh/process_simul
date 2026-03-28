@@ -29,11 +29,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     final s = ref.read(settingsProvider);
-    _selectedPort    = s.hartSerialPort;
-    _tcpHostCtrl     = TextEditingController(text: s.hartTcpHost);
-    _tcpPortCtrl     = TextEditingController(text: s.hartTcpPort.toString());
+    _selectedPort = s.hartSerialPort;
+    _tcpHostCtrl = TextEditingController(text: s.hartTcpHost);
+    _tcpPortCtrl = TextEditingController(text: s.hartTcpPort.toString());
     _hartSrvPortCtrl = TextEditingController(text: s.hartServerPort.toString());
-    _modbusPortCtrl  = TextEditingController(text: s.modbusPort.toString());
+    _modbusPortCtrl = TextEditingController(text: s.modbusPort.toString());
     _refreshPorts();
   }
 
@@ -69,12 +69,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!Platform.isWindows) return [];
     try {
       final result = await Process.run('powershell', [
-        '-NoProfile', '-NonInteractive', '-Command',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
         '[System.IO.Ports.SerialPort]::GetPortNames() -join ","',
       ]);
       final out = result.stdout.toString().trim();
       if (out.isEmpty) return _fallbackPorts();
-      final ports = out.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+      final ports = out
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
       ports.sort();
       return ports;
     } catch (_) {
@@ -103,7 +109,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (result == null || result.files.single.path == null) return;
     final path = result.files.single.path!;
 
-    setState(() { _importing = true; _importResult = null; });
+    setState(() {
+      _importing = true;
+      _importResult = null;
+    });
     try {
       final repo = ref.read(dbRepositoryProvider);
       final count = await repo.importFromDb(path);
@@ -111,7 +120,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await ref.read(hartTableProvider.notifier).load();
       await ref.read(modbusTableProvider.notifier).load();
       if (!mounted) return;
-      setState(() => _importResult = 'Imported $count rows from ${_baseName(path)}');
+      setState(
+          () => _importResult = 'Imported $count rows from ${_baseName(path)}');
     } catch (e) {
       if (!mounted) return;
       setState(() => _importResult = 'Import failed: $e');
@@ -135,7 +145,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── HART Server ───────────────────────────────────────────────
-              const _SectionTitle(icon: Icons.developer_board, label: 'HART Server'),
+              const _SectionTitle(
+                  icon: Icons.developer_board, label: 'HART Server'),
               const SizedBox(height: 12),
 
               _SettingsCard(children: [
@@ -143,10 +154,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   label: 'Connection mode',
                   child: SegmentedButton<CommMode>(
                     segments: const [
-                      ButtonSegment(value: CommMode.tcp,
-                          label: Text('TCP / IP'), icon: Icon(Icons.wifi, size: 14)),
-                      ButtonSegment(value: CommMode.serial,
-                          label: Text('Serial'),   icon: Icon(Icons.cable, size: 14)),
+                      ButtonSegment(
+                          value: CommMode.tcp,
+                          label: Text('TCP / IP'),
+                          icon: Icon(Icons.wifi, size: 14)),
+                      ButtonSegment(
+                          value: CommMode.serial,
+                          label: Text('Serial'),
+                          icon: Icon(Icons.cable, size: 14)),
                     ],
                     selected: {settings.hartMode},
                     onSelectionChanged: (v) => ref
@@ -167,7 +182,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(height: 8),
                   _LabelRow(
                     label: 'TCP port (client target)',
-                    child: _SmallField(ctrl: _tcpPortCtrl, hint: '5094', numeric: true),
+                    child: _SmallField(
+                        ctrl: _tcpPortCtrl, hint: '5094', numeric: true),
                   ),
                 ] else ...[
                   _LabelRow(
@@ -177,18 +193,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         child: _PortDropdown(
                           value: _availablePorts.contains(_selectedPort)
                               ? _selectedPort
-                              : (_availablePorts.isNotEmpty ? _availablePorts.first : null),
+                              : (_availablePorts.isNotEmpty
+                                  ? _availablePorts.first
+                                  : null),
                           items: _availablePorts,
                           loading: _loadingPorts,
-                          onChanged: (v) { if (v != null) setState(() => _selectedPort = v); },
+                          onChanged: (v) {
+                            if (v != null) setState(() => _selectedPort = v);
+                          },
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
                         tooltip: 'Refresh ports',
                         icon: _loadingPorts
-                            ? const SizedBox(width: 16, height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
                             : const Icon(Icons.refresh, size: 18),
                         onPressed: _loadingPorts ? null : _refreshPorts,
                         color: AppColors.primaryLight,
@@ -198,25 +221,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     'Lists available COM and CNCA/CNCB (com0com) ports.\nBaud: 1200, 8N1 (HART standard) — desktop only.',
-                    style: TextStyle(fontSize: 11, color: AppColors.textDisabled),
+                    style:
+                        TextStyle(fontSize: 11, color: AppColors.textDisabled),
+                  ),
+                  const Divider(),
+                  _LabelRow(
+                    label: 'HART server listen port',
+                    child: _SmallField(
+                        ctrl: _hartSrvPortCtrl, hint: '5094', numeric: true),
                   ),
                 ],
-                const Divider(),
-                _LabelRow(
-                  label: 'HART server listen port',
-                  child: _SmallField(ctrl: _hartSrvPortCtrl, hint: '5094', numeric: true),
-                ),
               ]),
 
               const SizedBox(height: 24),
               // ── Modbus TCP ────────────────────────────────────────────────
-              const _SectionTitle(icon: Icons.settings_ethernet, label: 'Modbus TCP'),
+              const _SectionTitle(
+                  icon: Icons.settings_ethernet, label: 'Modbus TCP'),
               const SizedBox(height: 12),
 
               _SettingsCard(children: [
                 _LabelRow(
                   label: 'Modbus TCP listen port',
-                  child: _SmallField(ctrl: _modbusPortCtrl, hint: '502', numeric: true),
+                  child: _SmallField(
+                      ctrl: _modbusPortCtrl, hint: '502', numeric: true),
                 ),
                 const SizedBox(height: 4),
                 const Text(
@@ -228,34 +255,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
               const SizedBox(height: 24),
               // ── Import ────────────────────────────────────────────────────
-              const _SectionTitle(icon: Icons.upload_file, label: 'Import Database'),
+              const _SectionTitle(
+                  icon: Icons.upload_file, label: 'Import Database'),
               const SizedBox(height: 12),
 
               _SettingsCard(children: [
                 const Text(
                   'Select a SQLite .db file with the same schema (hart_meta, hart_data, modbus_data) '
                   'to replace all current table data.',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  style:
+                      TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 12),
                 Row(children: [
                   ElevatedButton.icon(
                     icon: _importing
-                        ? const SizedBox(width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.upload_file, size: 16),
-                    label: Text(_importing ? 'Importing…' : 'Import from .db file'),
+                    label: Text(
+                        _importing ? 'Importing…' : 'Import from .db file'),
                     onPressed: _importing ? null : _importDb,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.secondary,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
                     ),
                   ),
                 ]),
                 if (_importResult != null) ...[
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: _importResult!.startsWith('Import failed')
                           ? AppColors.error.withValues(alpha: 0.12)
@@ -270,10 +305,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: Row(children: [
                       Icon(
                         _importResult!.startsWith('Import failed')
-                            ? Icons.error_outline : Icons.check_circle_outline,
+                            ? Icons.error_outline
+                            : Icons.check_circle_outline,
                         size: 14,
                         color: _importResult!.startsWith('Import failed')
-                            ? AppColors.error : AppColors.success,
+                            ? AppColors.error
+                            : AppColors.success,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -281,7 +318,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               color: _importResult!.startsWith('Import failed')
-                                  ? AppColors.error : AppColors.success,
+                                  ? AppColors.error
+                                  : AppColors.success,
                             )),
                       ),
                     ]),
@@ -295,11 +333,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               const SizedBox(height: 12),
 
               _SettingsCard(children: [
-                const _InfoRow(label: 'Version',  value: '1.0.0'),
+                const _InfoRow(label: 'Version', value: '1.0.0'),
                 const Divider(),
                 const _InfoRow(label: 'Protocol', value: 'HART 5 · Modbus TCP'),
                 const Divider(),
-                const _InfoRow(label: 'Devices',  value: '11 HART field transmitters'),
+                const _InfoRow(label: 'Author', value: 'Josué Morais'),
                 const Divider(),
                 const _InfoRow(label: 'Platform', value: 'Windows & Android'),
               ]),
@@ -327,25 +365,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _save() {
     final s = ref.read(settingsProvider);
     ref.read(settingsProvider.notifier).save(s.copyWith(
-      hartSerialPort: _selectedPort,
-      hartTcpHost:    _tcpHostCtrl.text.trim(),
-      hartTcpPort:    int.tryParse(_tcpPortCtrl.text) ?? 5094,
-      hartServerPort: int.tryParse(_hartSrvPortCtrl.text) ?? 5094,
-      modbusPort:     int.tryParse(_modbusPortCtrl.text) ?? 502,
-    ));
+          hartSerialPort: _selectedPort,
+          hartTcpHost: _tcpHostCtrl.text.trim(),
+          hartTcpPort: int.tryParse(_tcpPortCtrl.text) ?? 5094,
+          hartServerPort: int.tryParse(_hartSrvPortCtrl.text) ?? 5094,
+          modbusPort: int.tryParse(_modbusPortCtrl.text) ?? 502,
+        ));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved'), duration: Duration(seconds: 2)),
+      const SnackBar(
+          content: Text('Settings saved'), duration: Duration(seconds: 2)),
     );
   }
 }
 
 // ── Port dropdown ─────────────────────────────────────────────────────────────
 class _PortDropdown extends StatelessWidget {
-  final String?         value;
-  final List<String>    items;
-  final bool            loading;
+  final String? value;
+  final List<String> items;
+  final bool loading;
   final ValueChanged<String?> onChanged;
-  const _PortDropdown({this.value, required this.items, required this.loading,
+  const _PortDropdown(
+      {this.value,
+      required this.items,
+      required this.loading,
       required this.onChanged});
 
   @override
@@ -354,17 +396,24 @@ class _PortDropdown extends StatelessWidget {
       return const LinearProgressIndicator(minHeight: 32);
     }
     return InputDecorator(
-      decoration: const InputDecoration(isDense: true,
+      decoration: const InputDecoration(
+          isDense: true,
           contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4)),
       child: DropdownButton<String>(
         value: value,
         isExpanded: true,
         underline: const SizedBox.shrink(),
-        style: const TextStyle(fontSize: 13, fontFamily: 'monospace',
+        style: const TextStyle(
+            fontSize: 13,
+            fontFamily: 'monospace',
             color: AppColors.textPrimary),
-        items: items.map((p) => DropdownMenuItem(value: p,
-            child: Text(p, style: const TextStyle(
-                fontSize: 13, fontFamily: 'monospace')))).toList(),
+        items: items
+            .map((p) => DropdownMenuItem(
+                value: p,
+                child: Text(p,
+                    style: const TextStyle(
+                        fontSize: 13, fontFamily: 'monospace'))))
+            .toList(),
         onChanged: onChanged,
       ),
     );
@@ -374,7 +423,7 @@ class _PortDropdown extends StatelessWidget {
 // ── Shared helper widgets ─────────────────────────────────────────────────────
 class _SectionTitle extends StatelessWidget {
   final IconData icon;
-  final String   label;
+  final String label;
   const _SectionTitle({required this.icon, required this.label});
 
   @override
@@ -382,8 +431,11 @@ class _SectionTitle extends StatelessWidget {
         Icon(icon, size: 16, color: AppColors.primaryLight),
         const SizedBox(width: 8),
         Text(label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary, letterSpacing: 0.3)),
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+                letterSpacing: 0.3)),
       ]);
 }
 
@@ -410,9 +462,11 @@ class _LabelRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(children: [
-        Expanded(flex: 3,
-            child: Text(label, style: const TextStyle(fontSize: 13,
-                color: AppColors.textSecondary))),
+        Expanded(
+            flex: 3,
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary))),
         Expanded(flex: 4, child: child),
       ]);
 }
@@ -421,18 +475,22 @@ class _SmallField extends StatelessWidget {
   final TextEditingController ctrl;
   final String hint;
   final bool numeric;
-  const _SmallField({required this.ctrl, required this.hint, this.numeric = false});
+  const _SmallField(
+      {required this.ctrl, required this.hint, this.numeric = false});
 
   @override
   Widget build(BuildContext context) => TextField(
         controller: ctrl,
         keyboardType: numeric ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(fontSize: 13, fontFamily: 'monospace',
+        style: const TextStyle(
+            fontSize: 13,
+            fontFamily: 'monospace',
             color: AppColors.textPrimary),
         decoration: InputDecoration(
           hintText: hint,
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         ),
       );
 }
@@ -446,10 +504,15 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(children: [
-          Expanded(child: Text(label,
-              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary))),
-          Text(value, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary,
-              fontWeight: FontWeight.w500)),
+          Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary))),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w500)),
         ]),
       );
 }

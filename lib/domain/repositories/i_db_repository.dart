@@ -24,12 +24,15 @@ abstract class IDbRepository {
   // ── HART CRUD ───────────────────────────────────────────────────────────────
   Future<void> addHartDevice(String deviceName);
   Future<void> removeHartDevice(String deviceName);
+  Future<void> renameHartDevice(String oldName, String newName);
   Future<void> addHartColumn(String colName, int byteSize, String typeStr, String defaultHex);
   Future<void> removeHartColumn(String colName);
+  Future<void> editHartColumn(String oldColName, String newColName, int byteSize, String typeStr, String defaultHex);
 
   // ── Modbus CRUD ─────────────────────────────────────────────────────────────
   Future<void> addModbusVariable(String name, int byteSize, String typeStr, String mbPoint, String address, String formula);
   Future<void> removeModbusVariable(String name);
+  Future<void> editModbusVariable(String oldName, String newName, int byteSize, String typeStr, String mbPoint, String address, String formula);
 
   // ── Import ──────────────────────────────────────────────────────────────────
   /// Imports HART and Modbus data from an external SQLite .db file.

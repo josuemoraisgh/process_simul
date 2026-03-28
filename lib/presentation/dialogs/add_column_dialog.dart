@@ -2,27 +2,44 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 
 /// Returns (colName, byteSize, typeStr, defaultHex) or null.
+/// Pass [initial] to open in edit mode — name field is prefilled and editable.
 class AddColumnDialog extends StatefulWidget {
-  const AddColumnDialog({super.key});
+  final (String, int, String, String)? initial;
+  const AddColumnDialog({super.key, this.initial});
 
-  static Future<(String, int, String, String)?> show(BuildContext context) =>
+  static Future<(String, int, String, String)?> show(BuildContext context,
+          {(String, int, String, String)? initial}) =>
       showDialog<(String, int, String, String)>(
-          context: context, builder: (_) => const AddColumnDialog());
+          context: context,
+          builder: (_) => AddColumnDialog(initial: initial));
 
   @override
   State<AddColumnDialog> createState() => _AddColumnDialogState();
 }
 
 class _AddColumnDialogState extends State<AddColumnDialog> {
-  final _nameCtrl     = TextEditingController();
-  final _byteSizeCtrl = TextEditingController(text: '4');
-  final _defaultCtrl  = TextEditingController(text: '00000000');
-  String _typeStr     = 'FLOAT';
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _byteSizeCtrl;
+  late final TextEditingController _defaultCtrl;
+  late String _typeStr;
+  bool get _isEdit => widget.initial != null;
 
   static const _types = [
     'FLOAT', 'UNSIGNED', 'INTEGER', 'PACKED_ASCII', 'DATE', 'ENUM00',
     'BIT_ENUM02',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    final init = widget.initial;
+    _nameCtrl     = TextEditingController(text: init?.$1 ?? '');
+    _byteSizeCtrl = TextEditingController(text: (init?.$2 ?? 4).toString());
+    _defaultCtrl  = TextEditingController(text: init?.$4 ?? '00000000');
+    _typeStr      = init?.$3 ?? 'FLOAT';
+    // Ensure current typeStr is in the list
+    if (!_types.contains(_typeStr)) _typeStr = 'FLOAT';
+  }
 
   @override
   void dispose() {
@@ -34,16 +51,18 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Add Variable (Column)'),
+        title: Text(_isEdit ? 'Edit Variable' : 'Add Variable (Column)'),
         content: SizedBox(
           width: 380,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: _nameCtrl,
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Column name',
                 hintText: 'e.g. my_variable',
+                prefixIcon:
+                    Icon(_isEdit ? Icons.edit : Icons.add, size: 16),
               ),
             ),
             const SizedBox(height: 10),
@@ -53,10 +72,13 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
                   initialValue: _typeStr,
                   decoration: const InputDecoration(labelText: 'Type'),
                   items: _types
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t,
-                          style: const TextStyle(fontSize: 12))))
+                      .map((t) => DropdownMenuItem(
+                          value: t,
+                          child: Text(t,
+                              style: const TextStyle(fontSize: 12))))
                       .toList(),
-                  onChanged: (v) => setState(() => _typeStr = v ?? _typeStr),
+                  onChanged: (v) =>
+                      setState(() => _typeStr = v ?? _typeStr),
                 ),
               ),
               const SizedBox(width: 10),
@@ -72,8 +94,9 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
             const SizedBox(height: 10),
             TextField(
               controller: _defaultCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Default hex value',
+              decoration: InputDecoration(
+                labelText:
+                    _isEdit ? 'Default hex value (unchanged)' : 'Default hex value',
                 hintText: '00000000',
               ),
               style: const TextStyle(fontFamily: 'monospace'),
@@ -89,7 +112,8 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
               child: const Text(
                 'FLOAT=4 bytes · UNSIGNED=1-4 · PACKED_ASCII=6-32\n'
                 'Default value must be a hex string (no spaces)',
-                style: TextStyle(fontSize: 11, color: AppColors.textDisabled),
+                style:
+                    TextStyle(fontSize: 11, color: AppColors.textDisabled),
               ),
             ),
           ]),
@@ -99,8 +123,8 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel')),
           ElevatedButton.icon(
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('Add'),
+            icon: Icon(_isEdit ? Icons.save : Icons.add, size: 16),
+            label: Text(_isEdit ? 'Save' : 'Add'),
             onPressed: _submit,
           ),
         ],
@@ -109,7 +133,7 @@ class _AddColumnDialogState extends State<AddColumnDialog> {
   void _submit() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) return;
-    final byteSize = int.tryParse(_byteSizeCtrl.text) ?? 4;
+    final byteSize   = int.tryParse(_byteSizeCtrl.text) ?? 4;
     final defaultHex = _defaultCtrl.text.trim().toUpperCase();
     Navigator.pop(context, (name, byteSize, _typeStr, defaultHex));
   }
