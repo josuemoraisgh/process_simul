@@ -8,11 +8,19 @@ import '../../dialogs/edit_cell_dialog.dart';
 import '../../dialogs/add_device_dialog.dart';
 import '../../dialogs/add_column_dialog.dart';
 
-class HartTableScreen extends ConsumerWidget {
+class HartTableScreen extends ConsumerStatefulWidget {
   const HartTableScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HartTableScreen> createState() => _HartTableScreenState();
+}
+
+class _HartTableScreenState extends ConsumerState<HartTableScreen> {
+  bool _sortAsc = true;
+  String _filter = '';
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(hartTableProvider);
 
     if (state.loading) {
@@ -32,83 +40,169 @@ class HartTableScreen extends ConsumerWidget {
       );
     }
 
+    // Apply filter and sort to devices
+    var devices = state.devices.toList();
+    if (_filter.isNotEmpty) {
+      final q = _filter.toLowerCase();
+      devices = devices.where((d) => d.toLowerCase().contains(q)).toList();
+    }
+    devices.sort((a, b) => _sortAsc
+        ? a.toLowerCase().compareTo(b.toLowerCase())
+        : b.toLowerCase().compareTo(a.toLowerCase()));
+
     return Column(children: [
-      _HartToolbar(state: state),
-      Expanded(child: _HartTable(state: state)),
-      _TableFooter(deviceCount: state.devices.length,
-          colCount: state.visibleCols.length),
+      _HartToolbar(
+        state: state,
+        filter: _filter,
+        onFilterChanged: (v) => setState(() => _filter = v),
+      ),
+      Expanded(
+          child: _HartTable(
+        state: state,
+        sortedDevices: devices,
+        sortAsc: _sortAsc,
+        onToggleSort: () => setState(() => _sortAsc = !_sortAsc),
+      )),
+      _TableFooter(
+          deviceCount: devices.length, colCount: state.visibleCols.length),
     ]);
   }
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
-class _HartToolbar extends ConsumerWidget {
+class _HartToolbar extends ConsumerStatefulWidget {
   final HartTableState state;
-  const _HartToolbar({required this.state});
+  final String filter;
+  final ValueChanged<String> onFilterChanged;
+  const _HartToolbar(
+      {required this.state,
+      required this.filter,
+      required this.onFilterChanged});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_HartToolbar> createState() => _HartToolbarState();
+}
+
+class _HartToolbarState extends ConsumerState<_HartToolbar> {
+  final _filterCtrl = TextEditingController();
+
+  @override
+  void didUpdateWidget(covariant _HartToolbar old) {
+    super.didUpdateWidget(old);
+    if (widget.filter != _filterCtrl.text) {
+      _filterCtrl.text = widget.filter;
+    }
+  }
+
+  @override
+  void dispose() {
+    _filterCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final filter = widget.filter;
+    final onFilterChanged = widget.onFilterChanged;
+
     return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: const BoxDecoration(
-        color: AppColors.cardDark,
-        border: Border(bottom: BorderSide(color: AppColors.borderDark)),
+      color: AppColors.cardDark,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            // ── Filter (first) ──────────────────────────────────────────────
+            SizedBox(
+              width: 160,
+              height: 30,
+              child: TextField(
+                controller: _filterCtrl,
+                style: const TextStyle(fontSize: 12),
+                decoration: InputDecoration(
+                  hintText: 'Filter devices…',
+                  hintStyle: const TextStyle(
+                      fontSize: 11, color: AppColors.textDisabled),
+                  prefixIcon: const Icon(Icons.filter_list,
+                      size: 14, color: AppColors.textDisabled),
+                  prefixIconConstraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 0),
+                  suffixIcon: filter.isNotEmpty
+                      ? GestureDetector(
+                          onTap: () {
+                            _filterCtrl.clear();
+                            onFilterChanged('');
+                          },
+                          child: const Icon(Icons.close,
+                              size: 14, color: AppColors.textDisabled),
+                        )
+                      : null,
+                  suffixIconConstraints:
+                      const BoxConstraints(minWidth: 24, minHeight: 0),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(
+                          color: AppColors.borderDark.withValues(alpha: 0.5))),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(
+                          color: AppColors.borderDark.withValues(alpha: 0.5))),
+                ),
+                onChanged: onFilterChanged,
+              ),
+            ),
+            _Sep(),
+            // ── Instrument (Row) buttons ────────────────────────────────────
+            const _ToolbarLabel('Instrument:'),
+            _ToolBtn(
+              icon: Icons.add,
+              label: 'Add',
+              color: AppColors.success,
+              onTap: () => _addDevice(context, ref),
+            ),
+            _ToolBtn(
+              icon: Icons.edit,
+              label: 'Edit',
+              color: AppColors.accent,
+              onTap: () => _editDevice(context, ref, state),
+            ),
+            _ToolBtn(
+              icon: Icons.remove,
+              label: 'Remove',
+              color: AppColors.error,
+              onTap: () => _removeDevice(context, ref, state),
+            ),
+            _Sep(),
+            // ── Variable (Column) buttons ───────────────────────────────────
+            const _ToolbarLabel('Variable:'),
+            _ToolBtn(
+              icon: Icons.add,
+              label: 'Add',
+              color: AppColors.success,
+              onTap: () => _addColumn(context, ref),
+            ),
+            _ToolBtn(
+              icon: Icons.edit,
+              label: 'Edit',
+              color: AppColors.accent,
+              onTap: () => _editColumn(context, ref, state),
+            ),
+            _ToolBtn(
+              icon: Icons.remove,
+              label: 'Remove',
+              color: AppColors.error,
+              onTap: () => _removeColumn(context, ref, state),
+            ),
+          ],
+        ),
       ),
-      child: Row(children: [
-        // ── Instrument (Row) buttons ──────────────────────────────────────
-        const _ToolbarLabel('Instrument:'),
-        const SizedBox(width: 6),
-        _ToolBtn(
-          icon: Icons.add,
-          label: 'Add',
-          color: AppColors.success,
-          onTap: () => _addDevice(context, ref),
-        ),
-        const SizedBox(width: 4),
-        _ToolBtn(
-          icon: Icons.edit,
-          label: 'Edit',
-          color: AppColors.accent,
-          onTap: () => _editDevice(context, ref, state),
-        ),
-        const SizedBox(width: 4),
-        _ToolBtn(
-          icon: Icons.remove,
-          label: 'Remove',
-          color: AppColors.error,
-          onTap: () => _removeDevice(context, ref, state),
-        ),
-        _Sep(),
-        // ── Variable (Column) buttons ─────────────────────────────────────
-        const _ToolbarLabel('Variable:'),
-        const SizedBox(width: 6),
-        _ToolBtn(
-          icon: Icons.add,
-          label: 'Add',
-          color: AppColors.success,
-          onTap: () => _addColumn(context, ref),
-        ),
-        const SizedBox(width: 4),
-        _ToolBtn(
-          icon: Icons.edit,
-          label: 'Edit',
-          color: AppColors.accent,
-          onTap: () => _editColumn(context, ref, state),
-        ),
-        const SizedBox(width: 4),
-        _ToolBtn(
-          icon: Icons.remove,
-          label: 'Remove',
-          color: AppColors.error,
-          onTap: () => _removeColumn(context, ref, state),
-        ),
-        const Spacer(),
-        Text(
-          '${state.devices.length} instruments · ${state.visibleCols.length} variables',
-          style: const TextStyle(fontSize: 11, color: AppColors.textDisabled),
-        ),
-      ]),
     );
   }
 
@@ -234,24 +328,32 @@ class _HartToolbar extends ConsumerWidget {
 }
 
 // ── Main table with synchronized scrollbars ───────────────────────────────────
-class _HartTable extends StatefulWidget {
+class _HartTable extends ConsumerStatefulWidget {
   final HartTableState state;
-  const _HartTable({required this.state});
+  final List<String> sortedDevices;
+  final bool sortAsc;
+  final VoidCallback onToggleSort;
+  const _HartTable({
+    required this.state,
+    required this.sortedDevices,
+    required this.sortAsc,
+    required this.onToggleSort,
+  });
 
   @override
-  State<_HartTable> createState() => _HartTableState();
+  ConsumerState<_HartTable> createState() => _HartTableState();
 }
 
-class _HartTableState extends State<_HartTable> {
-  static const double _rowH  = 38.0;
-  static const double _colW  = 130.0;
-  static const double _devW  = 110.0;
+class _HartTableState extends ConsumerState<_HartTable> {
+  static const double _rowH = 38.0;
+  static const double _colW = 130.0;
+  static const double _devW = 110.0;
   static const double _headH = 36.0;
 
-  final _vCtrl     = ScrollController();
+  final _vCtrl = ScrollController();
   final _hHeadCtrl = ScrollController();
   final _hBodyCtrl = ScrollController();
-  bool  _syncing   = false;
+  bool _syncing = false;
 
   @override
   void initState() {
@@ -288,9 +390,10 @@ class _HartTableState extends State<_HartTable> {
 
   @override
   Widget build(BuildContext context) {
-    final s       = widget.state;
+    final s = widget.state;
+    final devices = widget.sortedDevices;
     final numCols = s.visibleCols.length;
-    final bodyW   = numCols * _colW;
+    final bodyW = numCols * _colW;
 
     return Column(children: [
       // ── Column headers (sticky top) ───────────────────────────────────
@@ -298,16 +401,36 @@ class _HartTableState extends State<_HartTable> {
         height: _headH,
         color: AppColors.cardDark,
         child: Row(children: [
-          // Device corner cell
-          Container(
-            width: _devW,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: AppColors.borderDark))),
-            child: const Text('DEVICE',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800,
-                    color: AppColors.textSecondary, letterSpacing: 1)),
+          // Device corner cell – clickable for sort
+          GestureDetector(
+            onTap: widget.onToggleSort,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Container(
+                width: _devW,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: const BoxDecoration(
+                    border:
+                        Border(right: BorderSide(color: AppColors.borderDark))),
+                child: Row(children: [
+                  const Text('DEVICE',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textSecondary,
+                          letterSpacing: 1)),
+                  const SizedBox(width: 4),
+                  Icon(
+                    widget.sortAsc
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward,
+                    size: 12,
+                    color: AppColors.textDisabled,
+                  ),
+                ]),
+              ),
+            ),
           ),
           // Scrollable column headers (synced with body, no visible scrollbar)
           Expanded(
@@ -315,9 +438,20 @@ class _HartTableState extends State<_HartTable> {
               controller: _hHeadCtrl,
               scrollDirection: Axis.horizontal,
               child: Row(
-                children: s.visibleCols
-                    .map((c) => _ColHeader(label: c, width: _colW))
-                    .toList(),
+                children: s.visibleCols.map((c) {
+                  final meta = s.data.values
+                      .expand((m) => m.entries)
+                      .where((e) => e.key == c)
+                      .map((e) => e.value)
+                      .firstOrNull;
+                  return _ColHeader(
+                    label: c,
+                    width: _colW,
+                    typeStr: meta?.typeStr ?? 'FLOAT',
+                    byteSize: meta?.byteSize ?? 4,
+                    onTap: () => _onHeaderTap(context, c, s),
+                  );
+                }).toList(),
               ),
             ),
           ),
@@ -333,10 +467,10 @@ class _HartTableState extends State<_HartTable> {
             width: _devW,
             child: ListView.builder(
               controller: _vCtrl,
-              itemCount: s.devices.length,
+              itemCount: devices.length,
               itemExtent: _rowH,
               itemBuilder: (_, i) => _DeviceNameCell(
-                name: s.devices[i],
+                name: devices[i],
                 index: i,
                 height: _rowH,
                 width: _devW,
@@ -362,10 +496,10 @@ class _HartTableState extends State<_HartTable> {
                       final state = ref.watch(hartTableProvider);
                       return ListView.builder(
                         controller: _vCtrl,
-                        itemCount: state.devices.length,
+                        itemCount: devices.length,
                         itemExtent: _rowH,
                         itemBuilder: (_, i) {
-                          final device = state.devices[i];
+                          final device = devices[i];
                           return _DataRow(
                             device: device,
                             cols: state.visibleCols,
@@ -374,7 +508,7 @@ class _HartTableState extends State<_HartTable> {
                             height: _rowH,
                             index: i,
                             onDoubleTap: (col) =>
-                                _onCellDoubleTap(ctx, ref, device, col, state),
+                                _onCellDoubleTap(ctx, device, col, state),
                           );
                         },
                       );
@@ -389,8 +523,8 @@ class _HartTableState extends State<_HartTable> {
     ]);
   }
 
-  Future<void> _onCellDoubleTap(BuildContext context, WidgetRef ref,
-      String device, String col, HartTableState state) async {
+  Future<void> _onCellDoubleTap(BuildContext context, String device, String col,
+      HartTableState state) async {
     final v = state.data[device]?[col];
     if (v == null) return;
     final newVal = await EditCellDialog.show(context, v, state.showHuman);
@@ -400,44 +534,84 @@ class _HartTableState extends State<_HartTable> {
           .setCellValue(device, col, newVal);
     }
   }
+
+  Future<void> _onHeaderTap(
+      BuildContext context, String colName, HartTableState state) async {
+    final meta = state.data.values
+        .expand((m) => m.entries)
+        .where((e) => e.key == colName)
+        .map((e) => e.value)
+        .firstOrNull;
+    final currentHex = meta?.rawValue ?? '00000000';
+    final initial = (
+      colName,
+      meta?.byteSize ?? 4,
+      meta?.typeStr ?? 'FLOAT',
+      currentHex.startsWith('@') || currentHex.startsWith(r'$')
+          ? '00000000'
+          : currentHex,
+    );
+    final spec = await AddColumnDialog.show(context, initial: initial);
+    if (spec == null) return;
+    await ref
+        .read(hartTableProvider.notifier)
+        .editColumn(colName, spec.$1, spec.$2, spec.$3, spec.$4);
+  }
 }
 
 // ── Sub-widgets ───────────────────────────────────────────────────────────────
 class _ColHeader extends StatelessWidget {
   final String label;
   final double width;
-  const _ColHeader({required this.label, required this.width});
+  final String typeStr;
+  final int byteSize;
+  final VoidCallback? onTap;
+  const _ColHeader({
+    required this.label,
+    required this.width,
+    required this.typeStr,
+    required this.byteSize,
+    this.onTap,
+  });
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: width,
-        height: 36,
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: const BoxDecoration(
-            border: Border(right: BorderSide(color: AppColors.borderDark))),
-        child: Tooltip(
-          message: label,
-          child: Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                  letterSpacing: 0.3)),
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            width: width,
+            height: 36,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: const BoxDecoration(
+                border: Border(right: BorderSide(color: AppColors.borderDark))),
+            child: Tooltip(
+              message: '$label\nType: $typeStr · Bytes: $byteSize',
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
+                      letterSpacing: 0.3)),
+            ),
+          ),
         ),
       );
 }
 
 class _DeviceNameCell extends StatelessWidget {
   final String name;
-  final int    index;
+  final int index;
   final double height;
   final double width;
   const _DeviceNameCell(
-      {required this.name, required this.index,
-       required this.height, required this.width});
+      {required this.name,
+      required this.index,
+      required this.height,
+      required this.width});
 
   @override
   Widget build(BuildContext context) {
@@ -458,12 +632,12 @@ class _DeviceNameCell extends StatelessWidget {
 }
 
 class _DataRow extends StatelessWidget {
-  final String         device;
-  final List<String>   cols;
+  final String device;
+  final List<String> cols;
   final HartTableState state;
-  final double         colW;
-  final double         height;
-  final int            index;
+  final double colW;
+  final double height;
+  final int index;
   final void Function(String col) onDoubleTap;
 
   const _DataRow({
@@ -484,7 +658,7 @@ class _DataRow extends StatelessWidget {
       height: height,
       child: Row(
         children: cols.map((col) {
-          final model   = state.cellModel(device, col);
+          final model = state.cellModel(device, col);
           final display = state.cellDisplay(device, col);
           return _DataCell(
             display: display,
@@ -501,11 +675,11 @@ class _DataRow extends StatelessWidget {
 }
 
 class _DataCell extends StatelessWidget {
-  final String    display;
-  final DbModel   model;
-  final double    width;
-  final double    height;
-  final Color     bg;
+  final String display;
+  final DbModel model;
+  final double width;
+  final double height;
+  final Color bg;
   final VoidCallback onDoubleTap;
 
   const _DataCell({
@@ -520,9 +694,9 @@ class _DataCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (cellBg, textColor, prefix) = switch (model) {
-      DbModel.func  => (AppColors.cellFunc,  AppColors.infoLight,   '@'),
+      DbModel.func => (AppColors.cellFunc, AppColors.infoLight, '@'),
       DbModel.tFunc => (AppColors.cellTFunc, AppColors.successLight, r'$'),
-      _             => (bg,                  AppColors.textPrimary,  ''),
+      _ => (bg, AppColors.textPrimary, ''),
     };
 
     return GestureDetector(
@@ -537,7 +711,7 @@ class _DataCell extends StatelessWidget {
           decoration: BoxDecoration(
             color: cellBg,
             border: const Border(
-              right:  BorderSide(color: AppColors.borderDark, width: 0.5),
+              right: BorderSide(color: AppColors.borderDark, width: 0.5),
               bottom: BorderSide(color: AppColors.borderDark, width: 0.3),
             ),
           ),
@@ -556,9 +730,7 @@ class _DataCell extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 12,
-                      color: textColor,
-                      fontFamily: 'monospace')),
+                      fontSize: 12, color: textColor, fontFamily: 'monospace')),
             ),
           ]),
         ),
@@ -577,19 +749,18 @@ class _TableFooter extends StatelessWidget {
         height: 26,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: const BoxDecoration(
-          color: AppColors.surfaceDark,
-          border: Border(top: BorderSide(color: AppColors.borderDark))),
+            color: AppColors.surfaceDark,
+            border: Border(top: BorderSide(color: AppColors.borderDark))),
         child: Row(children: [
           const Icon(Icons.table_rows_outlined,
               size: 12, color: AppColors.textDisabled),
           const SizedBox(width: 4),
           Text('$deviceCount × $colCount',
-              style: const TextStyle(
-                  fontSize: 11, color: AppColors.textDisabled)),
+              style:
+                  const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
           const Spacer(),
           const Text('Double-tap cell to edit',
-              style: TextStyle(
-                  fontSize: 11, color: AppColors.textDisabled)),
+              style: TextStyle(fontSize: 11, color: AppColors.textDisabled)),
         ]),
       );
 }
@@ -600,18 +771,22 @@ class _ToolbarLabel extends StatelessWidget {
   const _ToolbarLabel(this.text);
   @override
   Widget build(BuildContext context) => Text(text,
-      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+      style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
           color: AppColors.textSecondary));
 }
 
 class _ToolBtn extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final Color        color;
+  final IconData icon;
+  final String label;
+  final Color color;
   final VoidCallback onTap;
   const _ToolBtn(
-      {required this.icon, required this.label,
-       required this.color, required this.onTap});
+      {required this.icon,
+      required this.label,
+      required this.color,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -629,9 +804,7 @@ class _ToolBtn extends StatelessWidget {
             const SizedBox(width: 4),
             Text(label,
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: color)),
+                    fontSize: 11, fontWeight: FontWeight.w600, color: color)),
           ]),
         ),
       );
@@ -640,19 +813,20 @@ class _ToolBtn extends StatelessWidget {
 class _Sep extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-        width: 1, height: 22,
-        margin: const EdgeInsets.symmetric(horizontal: 10),
-        color: AppColors.borderDark);
+      width: 1,
+      height: 22,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: AppColors.borderDark);
 }
 
 // ── Remove / Select dialog (shared for device and column) ────────────────────
 class _RemoveDialog extends StatefulWidget {
-  final String            title;
-  final List<String>      items;
-  final String?           selectedValue;
+  final String title;
+  final List<String> items;
+  final String? selectedValue;
   final ValueChanged<String?> onChanged;
-  final String            confirmLabel;
-  final Color             confirmColor;
+  final String confirmLabel;
+  final Color confirmColor;
 
   const _RemoveDialog({
     required this.title,
@@ -695,8 +869,8 @@ class _RemoveDialogState extends State<_RemoveDialog> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: widget.confirmColor),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: widget.confirmColor),
             onPressed: () => Navigator.pop(context, true),
             child: Text(widget.confirmLabel),
           ),

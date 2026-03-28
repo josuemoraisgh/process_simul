@@ -20,6 +20,9 @@ Future<void> main() async {
   // Initialise database
   await container.read(dbRepositoryProvider).init();
 
+  // Initialise global log so infrastructure layers can log via globalLog
+  container.read(logProvider);
+
   // Load persisted settings
   await container.read(settingsProvider.notifier).load();
 

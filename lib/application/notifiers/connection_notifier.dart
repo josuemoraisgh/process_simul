@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/react_var.dart';
 import '../../infrastructure/hart/hart_comm.dart';
 import '../../infrastructure/modbus/modbus_server.dart';
+import 'log_notifier.dart';
 
 /// State for HART server and Modbus server connection.
 class ConnectionState {
@@ -14,40 +15,41 @@ class ConnectionState {
 
   const ConnectionState({
     this.hartServerRunning = false,
-    this.modbusRunning     = false,
+    this.modbusRunning = false,
     this.hartError,
     this.modbusError,
-    this.hartPort          = 5094,
-    this.modbusPort        = 502,
+    this.hartPort = 5094,
+    this.modbusPort = 502,
   });
 
   ConnectionState copyWith({
-    bool?   hartServerRunning,
-    bool?   modbusRunning,
+    bool? hartServerRunning,
+    bool? modbusRunning,
     String? hartError,
     String? modbusError,
-    int?    hartPort,
-    int?    modbusPort,
-  }) => ConnectionState(
-    hartServerRunning: hartServerRunning ?? this.hartServerRunning,
-    modbusRunning:     modbusRunning     ?? this.modbusRunning,
-    hartError:         hartError,
-    modbusError:       modbusError,
-    hartPort:          hartPort          ?? this.hartPort,
-    modbusPort:        modbusPort        ?? this.modbusPort,
-  );
+    int? hartPort,
+    int? modbusPort,
+  }) =>
+      ConnectionState(
+        hartServerRunning: hartServerRunning ?? this.hartServerRunning,
+        modbusRunning: modbusRunning ?? this.modbusRunning,
+        hartError: hartError,
+        modbusError: modbusError,
+        hartPort: hartPort ?? this.hartPort,
+        modbusPort: modbusPort ?? this.modbusPort,
+      );
 }
 
 typedef TableGetter = Map<String, Map<String, ReactVar>> Function();
 typedef CellWriter = void Function(String device, String col, String hex);
 
 class ConnectionNotifier extends StateNotifier<ConnectionState> {
-  HartCommServer?  _hartServer;
+  HartCommServer? _hartServer;
   ModbusTcpServer? _modbusServer;
 
   // Modbus register maps
-  final _hrMap = <int, int>{};  // Holding Registers (writable)
-  final _irMap = <int, int>{};  // Input Registers   (readable)
+  final _hrMap = <int, int>{}; // Holding Registers (writable)
+  final _irMap = <int, int>{}; // Input Registers   (readable)
   final _coilMap = <int, bool>{};
 
   ConnectionNotifier() : super(const ConnectionState());
@@ -66,8 +68,8 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       state = state.copyWith(
           hartServerRunning: true, hartError: null, hartPort: port);
     } catch (e) {
-      state = state.copyWith(
-          hartServerRunning: false, hartError: e.toString());
+      globalLog.error('HART', 'Failed to start server: $e');
+      state = state.copyWith(hartServerRunning: false, hartError: e.toString());
     }
   }
 
@@ -86,15 +88,15 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
         getRegister: (addr, isInput) =>
             (isInput ? _irMap[addr] : _hrMap[addr]) ?? 0,
         setRegister: (addr, val) => _hrMap[addr] = val,
-        getCoil:    (addr, isInput) => _coilMap[addr] ?? false,
-        setCoil:    (addr, val)    => _coilMap[addr]  = val,
+        getCoil: (addr, isInput) => _coilMap[addr] ?? false,
+        setCoil: (addr, val) => _coilMap[addr] = val,
       );
       await _modbusServer!.start();
       state = state.copyWith(
           modbusRunning: true, modbusError: null, modbusPort: port);
     } catch (e) {
-      state = state.copyWith(
-          modbusRunning: false, modbusError: e.toString());
+      globalLog.error('Modbus', 'Failed to start server: $e');
+      state = state.copyWith(modbusRunning: false, modbusError: e.toString());
     }
   }
 

@@ -2,10 +2,12 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
 import '../../domain/entities/react_var.dart';
+import '../../application/notifiers/log_notifier.dart';
 import 'hart_transmitter.dart';
 
 typedef HartTableGetter = Map<String, Map<String, ReactVar>> Function();
-typedef HartCellWriter = void Function(String device, String col, String rawHex);
+typedef HartCellWriter = void Function(
+    String device, String col, String rawHex);
 
 /// TCP server that implements the HART protocol slave simulator.
 ///
@@ -34,21 +36,27 @@ class HartCommServer {
     _server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
     _running = true;
     _server!.listen(_onClient);
+    globalLog.info('HART', 'Server started on port $port');
   }
 
   Future<void> stop() async {
     _running = false;
     for (final c in _clients) {
-      try { c.destroy(); } catch (_) {}
+      try {
+        c.destroy();
+      } catch (_) {}
     }
     _clients.clear();
     await _server?.close();
     _server = null;
+    globalLog.info('HART', 'Server stopped');
   }
 
   // ── Client ────────────────────────────────────────────────────────────────
   void _onClient(Socket socket) {
     _clients.add(socket);
+    final addr = '${socket.remoteAddress.address}:${socket.remotePort}';
+    globalLog.info('HART', 'Client connected: $addr');
     final buf = <int>[];
     socket.listen(
       (data) {
@@ -57,11 +65,17 @@ class HartCommServer {
       },
       onDone: () {
         _clients.remove(socket);
-        try { socket.destroy(); } catch (_) {}
+        globalLog.info('HART', 'Client disconnected: $addr');
+        try {
+          socket.destroy();
+        } catch (_) {}
       },
-      onError: (_) {
+      onError: (e) {
         _clients.remove(socket);
-        try { socket.destroy(); } catch (_) {}
+        globalLog.warning('HART', 'Client error ($addr): $e');
+        try {
+          socket.destroy();
+        } catch (_) {}
       },
       cancelOnError: true,
     );
@@ -103,9 +117,9 @@ class HartCommServer {
     while (pos < raw.length && raw[pos] == 0xFF) pos++;
     if (pos >= raw.length) return;
 
-    final delim   = raw[pos++];
-    final isLong  = (delim & 0x80) != 0;
-    int pollAddr  = 0;
+    final delim = raw[pos++];
+    final isLong = (delim & 0x80) != 0;
+    int pollAddr = 0;
     List<int> longAddr = [];
 
     if (isLong) {
@@ -119,7 +133,7 @@ class HartCommServer {
     }
 
     if (pos + 2 > raw.length) return;
-    final command   = raw[pos++];
+    final command = raw[pos++];
     final byteCount = raw[pos++];
     if (pos + byteCount > raw.length) return;
     final body = raw.sublist(pos, pos + byteCount);
@@ -137,7 +151,7 @@ class HartCommServer {
       }
     }
     if (device.isEmpty && table.isNotEmpty) {
-      device     = table.values.first;
+      device = table.values.first;
       deviceName = table.keys.first;
     }
 
@@ -148,6 +162,9 @@ class HartCommServer {
       device: device,
       onWrite: (col, hex) => writeCell(deviceName, col, hex),
     );
+
+    globalLog.debug('HART',
+        'Cmd ${command.toRadixString(16).padLeft(2, "0").toUpperCase()} → device=$deviceName, resp=${responseBody.length}B');
 
     _sendResponse(socket, command, pollAddr, isLong, longAddr, responseBody);
   }
@@ -160,8 +177,11 @@ class HartCommServer {
     final addrBytes = isLong ? longAddr : [pollAddr];
 
     final payload = <int>[
-      respDelim, ...addrBytes, command,
-      responseBody.length, ...responseBody,
+      respDelim,
+      ...addrBytes,
+      command,
+      responseBody.length,
+      ...responseBody,
     ];
 
     int cs = 0;
@@ -172,6 +192,8 @@ class HartCommServer {
       ...payload, cs,
     ]);
 
-    try { socket.add(packet); } catch (_) {}
+    try {
+      socket.add(packet);
+    } catch (_) {}
   }
 }

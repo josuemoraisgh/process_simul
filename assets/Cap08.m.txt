@@ -1,0 +1,79 @@
+%% Aula 08 de Controle Automático de Processos
+%% Controle de Nível – Controle Cascata e Seletivo
+
+clc
+clear
+s = tf('s');
+
+%% 1.3 Exemplo: Modelagem e controle, A=cte
+A = 9.5;  % 1m^2
+
+G13 = -1/(A*s);
+% sisotool(G13);
+z13 = 0.1;
+kc13 = -5;
+% C13 = kc13*(s+z13)/s;
+Ti13 = 1/z13;
+% C = kc13*(1+1/(Ti*s));
+
+%% 2.2 Exemplo: Simulação Cascata
+G1a = 5/(s+10);
+G1b = exp(-s)/(s+2);
+G1ab = G1a*G1b;
+% step(G1ab)
+
+% modelo aproximado FOPDT de G1ab
+tau22 = 0.61;
+kp22 = 0.25;
+teta22 = 1;
+G22 = kp22*exp(-teta22*s)/(tau22*s+1);
+% step(G1ab,G22)
+
+% Projetando um PID pelo método CHR
+kc22 = (0.6*tau22)/(kp22*teta22);
+Ti22 = tau22;
+Td22 = teta22/2;
+alfa22 = 10;
+
+% Modelo FOPDT de G1b
+tau_mes = 1/2;
+kp_mes = 1/2;
+teta_mes = 1;
+% Projetando o PID Mestre pelo método CHR
+kc_mes = (0.6*tau_mes)/(kp_mes*teta_mes);
+Ti_mes = tau_mes;
+Td_mes = teta_mes/2;
+
+% Projetndo o PI Escravo usando sisotool
+% sisotool(G1a)
+kc_esc = 1;
+Ti_esc = 0.05;
+% C = zpk(kc_esc*(1+1/(s*Ti_esc)));
+
+%% 3.2 Exemplo 1 e 2: Controle Seletivo
+G32 = exp(-s)/(s+1);
+% sisotool(G32)
+kc = 0.4;
+Ti = 1;
+
+
+%% Extra: Modelagem de um tubulão, A(h)
+R = 1.25;      % 1.25 metros de raio
+l = 7.655;     % 7,655 metros de comprimento
+a = 2*l*R;     % maior área 4.9087 m^2
+v = l*pi*R^2;  % volume total da caldeira 37.5764 m^3
+
+F0 = 1;
+Fi = 1;
+h0 = R;
+
+A1 = ((Fi-F0)*(h0-R))/(2*l*(2*R*h0-h0^2)^(3/2));
+B1 = -1/(2*l*sqrt(2*R*h0-h0^2));
+B2=-B1;
+C1 = 1; D1=0;
+
+sys = ss(A1,B1,C1,D1);
+Gex = C1*inv(s*eye(size(A1))-A1)*B1+D1;
+
+kc_ex = -5;
+Ti_ex = 10;

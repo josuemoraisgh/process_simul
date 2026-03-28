@@ -15,7 +15,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late TextEditingController _tcpHostCtrl;
-  late TextEditingController _tcpPortCtrl;
   late TextEditingController _hartSrvPortCtrl;
   late TextEditingController _modbusPortCtrl;
 
@@ -31,7 +30,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final s = ref.read(settingsProvider);
     _selectedPort = s.hartSerialPort;
     _tcpHostCtrl = TextEditingController(text: s.hartTcpHost);
-    _tcpPortCtrl = TextEditingController(text: s.hartTcpPort.toString());
     _hartSrvPortCtrl = TextEditingController(text: s.hartServerPort.toString());
     _modbusPortCtrl = TextEditingController(text: s.modbusPort.toString());
     _refreshPorts();
@@ -40,7 +38,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _tcpHostCtrl.dispose();
-    _tcpPortCtrl.dispose();
     _hartSrvPortCtrl.dispose();
     _modbusPortCtrl.dispose();
     super.dispose();
@@ -173,7 +170,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
                 const Divider(),
+                const SizedBox(height: 12),
                 if (settings.hartMode == CommMode.tcp) ...[
                   _LabelRow(
                     label: 'TCP host (client target)',
@@ -181,9 +180,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   _LabelRow(
-                    label: 'TCP port (client target)',
+                    label: 'HART server listen port',
                     child: _SmallField(
-                        ctrl: _tcpPortCtrl, hint: '5094', numeric: true),
+                        ctrl: _hartSrvPortCtrl, hint: '5094', numeric: true),
                   ),
                 ] else ...[
                   _LabelRow(
@@ -218,17 +217,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ]),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   const Text(
                     'Lists available COM and CNCA/CNCB (com0com) ports.\nBaud: 1200, 8N1 (HART standard) — desktop only.',
                     style:
                         TextStyle(fontSize: 11, color: AppColors.textDisabled),
-                  ),
-                  const Divider(),
-                  _LabelRow(
-                    label: 'HART server listen port',
-                    child: _SmallField(
-                        ctrl: _hartSrvPortCtrl, hint: '5094', numeric: true),
                   ),
                 ],
               ]),
@@ -367,7 +360,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.read(settingsProvider.notifier).save(s.copyWith(
           hartSerialPort: _selectedPort,
           hartTcpHost: _tcpHostCtrl.text.trim(),
-          hartTcpPort: int.tryParse(_tcpPortCtrl.text) ?? 5094,
           hartServerPort: int.tryParse(_hartSrvPortCtrl.text) ?? 5094,
           modbusPort: int.tryParse(_modbusPortCtrl.text) ?? 502,
         ));
