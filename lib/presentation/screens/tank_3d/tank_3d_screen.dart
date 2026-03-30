@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'boiler_3d_viewer.dart';
 
+/// Global notifier so MainShell can hide its chrome in fullscreen mode.
+final isFullscreenNotifier = ValueNotifier<bool>(false);
+
 class Tank3dScreen extends StatefulWidget {
   const Tank3dScreen({super.key});
 
@@ -25,7 +28,10 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
-    if (_isFullscreen) _setFullscreen(false);
+    if (_isFullscreen) {
+      isFullscreenNotifier.value = false;
+      _setFullscreen(false);
+    }
     super.dispose();
   }
 
@@ -48,12 +54,12 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
 
   void _toggleFullscreen() async {
     final goFull = !_isFullscreen;
-    await _setFullscreen(goFull);
-    if (!mounted) return;
     setState(() {
       _isFullscreen = goFull;
       _showExitButton = goFull;
     });
+    isFullscreenNotifier.value = goFull;
+    await _setFullscreen(goFull);
     if (goFull) {
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted && _showExitButton) {

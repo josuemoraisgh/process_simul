@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../application/providers/app_providers.dart';
 import '../widgets/comm_bar_widget.dart';
+import 'tank_3d/tank_3d_screen.dart' show isFullscreenNotifier;
 
 class MainShell extends ConsumerStatefulWidget {
   final Widget child;
@@ -32,25 +33,34 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.sizeOf(context).width >= 720;
+    return ValueListenableBuilder<bool>(
+      valueListenable: isFullscreenNotifier,
+      builder: (context, isFullscreen, _) {
+        if (isFullscreen) {
+          return Scaffold(body: widget.child);
+        }
 
-    return Scaffold(
-      appBar: _buildAppBar(context),
-      body: Column(
-        children: [
-          const CommBarWidget(),
-          Expanded(
-            child: isWide
-                ? Row(children: [
-                    _buildNavRail(),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: widget.child),
-                  ])
-                : widget.child,
+        final isWide = MediaQuery.sizeOf(context).width >= 720;
+
+        return Scaffold(
+          appBar: _buildAppBar(context),
+          body: Column(
+            children: [
+              const CommBarWidget(),
+              Expanded(
+                child: isWide
+                    ? Row(children: [
+                        _buildNavRail(),
+                        const VerticalDivider(width: 1),
+                        Expanded(child: widget.child),
+                      ])
+                    : widget.child,
+              ),
+            ],
           ),
-        ],
-      ),
-      bottomNavigationBar: isWide ? null : _buildNavBar(),
+          bottomNavigationBar: isWide ? null : _buildNavBar(),
+        );
+      },
     );
   }
 
