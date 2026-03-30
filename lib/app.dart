@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'core/constants/app_theme.dart';
 import 'presentation/screens/main_shell.dart';
 import 'presentation/screens/tank_3d/tank_3d_screen.dart';
-import 'presentation/screens/tank_3d/tank_3d_fullscreen_screen.dart';
 import 'presentation/screens/hart_table/hart_table_screen.dart';
 import 'presentation/screens/modbus_table/modbus_table_screen.dart';
 import 'presentation/screens/settings/settings_screen.dart';
@@ -13,14 +12,6 @@ import 'presentation/screens/logs/logs_screen.dart';
 final _router = GoRouter(
   initialLocation: '/tank3d',
   routes: [
-    GoRoute(
-      path: '/tank3d-fullscreen',
-      pageBuilder: (context, state) => CustomTransitionPage(
-        child: const Tank3dFullscreenScreen(),
-        transitionsBuilder: (context, animation, _, child) =>
-            FadeTransition(opacity: animation, child: child),
-      ),
-    ),
     ShellRoute(
       builder: (context, state, child) => MainShell(child: child),
       routes: [

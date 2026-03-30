@@ -15,13 +15,15 @@ class Boiler3dViewer extends StatefulWidget {
   final ValueChanged<BoilerState>? onStateChanged;
   final bool showControls;
   final VoidCallback? onEscapePressed;
+  final VoidCallback? onDoubleClick;
 
   const Boiler3dViewer({
     super.key,
-    required this.state,
+    this.state = const BoilerState(),
     this.onStateChanged,
     this.showControls = false,
     this.onEscapePressed,
+    this.onDoubleClick,
   });
 
   @override
@@ -33,6 +35,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
   late final String _id;
   final Utils _utils = Utils();
   bool _isLoaded = false;
+  InAppWebViewController? _webViewController;
 
   @override
   void initState() {
@@ -68,6 +71,29 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
     super.dispose();
   }
 
+  void _injectJsHandlers() {
+    final wvc = _webViewController;
+    if (wvc == null) return;
+    if (widget.onEscapePressed != null) {
+      wvc.evaluateJavascript(source: '''
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            window.flutter_inappwebview.callHandler('onEscapePressed');
+          }
+        });
+      ''');
+    }
+    if (widget.onDoubleClick != null) {
+      wvc.evaluateJavascript(source: '''
+        document.addEventListener('dblclick', function(e) {
+          e.preventDefault();
+          window.flutter_inappwebview.callHandler('onDoubleClick');
+        });
+      ''');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ModelViewer(
@@ -79,9 +105,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
       shadowIntensity: 0.4,
       shadowSoftness: 0.8,
       cameraControls: true,
-      autoRotate: true,
-      autoRotateDelay: 2000,
-      rotationPerSecond: '10deg',
+      autoRotate: false,
       cameraOrbit: '45deg 55deg 105%',
       interactionPrompt: InteractionPrompt.none,
       disableTap: true,
@@ -95,6 +119,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
         _controller.onModelLoaded.value = true;
         setState(() => _isLoaded = true);
         _syncModelState();
+        _injectJsHandlers();
       },
       onError: (error) {
         _controller.onModelLoaded.value = false;
@@ -103,6 +128,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
       onWebViewCreated: kIsWeb
           ? null
           : (InAppWebViewController webViewController) {
+              _webViewController = webViewController;
               _controller.init(
                 Flutter3DRepository(
                   IFlutter3DDatasource(_id, webViewController, true),
@@ -113,14 +139,12 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
                   handlerName: 'onEscapePressed',
                   callback: (_) => widget.onEscapePressed!(),
                 );
-                webViewController.evaluateJavascript(source: '''
-                  document.addEventListener('keydown', function(e) {
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      window.flutter_inappwebview.callHandler('onEscapePressed');
-                    }
-                  });
-                ''');
+              }
+              if (widget.onDoubleClick != null) {
+                webViewController.addJavaScriptHandler(
+                  handlerName: 'onDoubleClick',
+                  callback: (_) => widget.onDoubleClick!(),
+                );
               }
             },
     );
