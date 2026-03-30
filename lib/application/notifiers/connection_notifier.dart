@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/react_var.dart';
 import '../../infrastructure/hart/hart_comm.dart';
+import '../../infrastructure/hart/hart_serial_comm.dart';
 import '../../infrastructure/modbus/modbus_server.dart';
 import 'log_notifier.dart';
 
@@ -11,6 +12,7 @@ class ConnectionState {
   final String? hartError;
   final String? modbusError;
   final int hartPort;
+  final String hartSerialPort;
   final int modbusPort;
 
   const ConnectionState({
@@ -19,6 +21,7 @@ class ConnectionState {
     this.hartError,
     this.modbusError,
     this.hartPort = 5094,
+    this.hartSerialPort = '',
     this.modbusPort = 502,
   });
 
@@ -28,6 +31,7 @@ class ConnectionState {
     String? hartError,
     String? modbusError,
     int? hartPort,
+    String? hartSerialPort,
     int? modbusPort,
   }) =>
       ConnectionState(
@@ -36,6 +40,7 @@ class ConnectionState {
         hartError: hartError,
         modbusError: modbusError,
         hartPort: hartPort ?? this.hartPort,
+        hartSerialPort: hartSerialPort ?? this.hartSerialPort,
         modbusPort: modbusPort ?? this.modbusPort,
       );
 }
@@ -45,6 +50,7 @@ typedef CellWriter = void Function(String device, String col, String hex);
 
 class ConnectionNotifier extends StateNotifier<ConnectionState> {
   HartCommServer? _hartServer;
+  HartSerialServer? _hartSerial;
   ModbusTcpServer? _modbusServer;
 
   // Modbus register maps
@@ -74,9 +80,38 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   }
 
   Future<void> stopHartServer() async {
-    await _hartServer?.stop();
+    try {
+      await _hartServer?.stop();
+    } catch (e) {
+      globalLog.warning('HART', 'Error stopping TCP server: $e');
+    }
     _hartServer = null;
+    try {
+      await _hartSerial?.stop();
+    } catch (e) {
+      globalLog.warning('HART-Serial', 'Error stopping serial: $e');
+    }
+    _hartSerial = null;
     state = state.copyWith(hartServerRunning: false, hartError: null);
+  }
+
+  // ── HART Serial ────────────────────────────────────────────────────────────
+  Future<void> startHartSerial(
+      String portName, TableGetter getTable, CellWriter writeCell) async {
+    await stopHartServer();
+    try {
+      _hartSerial = HartSerialServer(
+        portName: portName,
+        getTable: getTable,
+        writeCell: writeCell,
+      );
+      await _hartSerial!.start();
+      state = state.copyWith(
+          hartServerRunning: true, hartError: null, hartSerialPort: portName);
+    } catch (e) {
+      globalLog.error('HART-Serial', 'Failed to open $portName: $e');
+      state = state.copyWith(hartServerRunning: false, hartError: e.toString());
+    }
   }
 
   // ── Modbus Server ──────────────────────────────────────────────────────────
@@ -113,6 +148,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   @override
   void dispose() {
     _hartServer?.stop();
+    _hartSerial?.stop();
     _modbusServer?.stop();
     super.dispose();
   }

@@ -9,24 +9,24 @@ class HartFrame {
   static const int kDelimShort = 0x02;
 
   /// Delimiter byte for long frame (with unique address).
-  static const int kDelimLong  = 0x82;
+  static const int kDelimLong = 0x82;
 
   /// Minimum preamble length.
   static const int kMinPreamble = 2;
 
   // ── Parsed fields ──────────────────────────────────────────────────────────
-  final int  delimiter;
-  final int  command;
-  final int  address;      // polling address (short frame)
+  final int delimiter;
+  final int command;
+  final int address; // polling address (short frame)
   final List<int> longAddress; // 5-byte unique address (long frame)
   final List<int> body;
 
   HartFrame({
     required this.delimiter,
     required this.command,
-    this.address   = 0,
+    this.address = 0,
     this.longAddress = const [],
-    this.body      = const [],
+    this.body = const [],
   });
 
   bool get isLongAddress => (delimiter & 0x80) != 0;
@@ -35,11 +35,10 @@ class HartFrame {
   // ── Builder ─────────────────────────────────────────────────────────────────
   /// Builds the full byte sequence (with 5 preamble bytes + checksum).
   Uint8List build({int preambleCount = 5, bool masterFrame = false}) {
-    final delim = isLongAddress ? kDelimLong : kDelimShort;
+    // Use the frame's own delimiter (supports both request and response types)
+    final delim = delimiter;
     // Address bytes
-    final addrBytes = isLongAddress
-        ? longAddress
-        : [address & 0xFF];
+    final addrBytes = isLongAddress ? longAddress : [address & 0xFF];
 
     final payload = <int>[
       delim,
@@ -87,7 +86,8 @@ class HartFrame {
       final byteCount = bytes[pos++];
       if (pos + byteCount + 1 > bytes.length) return null;
       final body = bytes.sublist(pos, pos + byteCount);
-      return HartFrame(delimiter: delim, command: cmd, address: addr, body: body);
+      return HartFrame(
+          delimiter: delim, command: cmd, address: addr, body: body);
     }
   }
 

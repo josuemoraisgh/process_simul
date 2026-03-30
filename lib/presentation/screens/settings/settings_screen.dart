@@ -265,7 +265,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Lists available COM and CNCA/CNCB (com0com) ports.\nBaud: 1200, 8N1 (HART standard) — desktop only.',
+                    'Lists available COM and CNCA/CNCB (com0com) ports.\nBaud: 1200, 8O1 (HART standard) — desktop only.',
                     style:
                         TextStyle(fontSize: 11, color: AppColors.textDisabled),
                   ),

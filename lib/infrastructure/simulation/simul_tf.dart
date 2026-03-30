@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../../domain/entities/react_var.dart';
 import '../hart/hart_type_converter.dart';
+import '../../application/notifiers/log_notifier.dart';
 
 /// Parses a transfer-function specification string of the form:
 ///   $[num_coeffs],[den_coeffs],delay,input_expr
@@ -22,12 +23,15 @@ class TFuncSpec {
     try {
       // Remove leading $
       final s = spec.startsWith(r'$') ? spec.substring(1) : spec;
-      // Match [num],[den],delay,expr
-      final re = RegExp(r'^\[([^\]]+)\],\[([^\]]+)\],([\d.]+),(.+)$');
+      // Match [num],[den],delay,expr  — tolerates optional whitespace
+      final re = RegExp(
+          r'^\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*,\s*([\d.]+)\s*,\s*(.+)$');
       final m = re.firstMatch(s.trim());
       if (m == null) return null;
-      final num = m.group(1)!.split(',').map(double.parse).toList();
-      final den = m.group(2)!.split(',').map(double.parse).toList();
+      // Coefficients may be separated by commas, spaces, or both
+      final splitter = RegExp(r'[\s,]+');
+      final num = m.group(1)!.trim().split(splitter).map(double.parse).toList();
+      final den = m.group(2)!.trim().split(splitter).map(double.parse).toList();
       final delay = double.parse(m.group(3)!);
       final expr = m.group(4)!.trim();
       return TFuncSpec(num: num, den: den, delay: delay, inputExpr: expr);
@@ -154,13 +158,17 @@ class SimulTf {
 
   bool get isRunning => _running;
 
+  int get entryCount => _entries.length;
+
   // ── Register / unregister ───────────────────────────────────────────────
-  void register(ReactVar variable, double Function() getInput) {
+  /// Returns `true` if the TF spec was parsed and registered successfully.
+  bool register(ReactVar variable, double Function() getInput) {
     final key = '${variable.rowName}.${variable.colName}';
     final spec = TFuncSpec.parse(variable.tFuncBody);
-    if (spec == null) return;
+    if (spec == null) return false;
     final sys = buildDiscreteSSFromTF(spec.num, spec.den, stepMs / 1000.0);
     _entries[key] = _TFEntry(variable: variable, sys: sys, getInput: getInput);
+    return true;
   }
 
   void unregister(String rowName, String colName) {
@@ -171,6 +179,7 @@ class SimulTf {
   void start() {
     if (_running) return;
     _running = true;
+    _loggedFirstTick = false;
     _timer = Timer.periodic(Duration(milliseconds: stepMs.toInt()), _tick);
   }
 
@@ -184,11 +193,20 @@ class SimulTf {
     for (final e in _entries.values) e.sys.reset();
   }
 
+  bool _loggedFirstTick = false;
+
   // ── Tick ─────────────────────────────────────────────────────────────────
   void _tick(Timer _) {
     bool anyChanged = false;
     for (final e in _entries.values) {
       double u = e.getInput();
+
+      // Log first tick for diagnostics
+      if (!_loggedFirstTick) {
+        final key = '${e.variable.rowName}.${e.variable.colName}';
+        globalLog.debug('TF', '$key input raw=$u');
+      }
+
       // Input normalisation (mirrors Python heuristic)
       if (u > 1000) {
         u = u / 65535.0;
@@ -202,7 +220,13 @@ class SimulTf {
       // Back-convert to float hex and store in evaluatedHex
       final hexVal = HartTypeConverter.doubleToHex(y);
       if (e.variable.setEvaluatedHex(hexVal)) anyChanged = true;
+
+      if (!_loggedFirstTick) {
+        final key = '${e.variable.rowName}.${e.variable.colName}';
+        globalLog.debug('TF', '$key u=$u y=$y hex=$hexVal');
+      }
     }
+    _loggedFirstTick = true;
     if (anyChanged) onChanged?.call();
   }
 }

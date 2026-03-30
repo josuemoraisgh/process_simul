@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import '../../domain/entities/react_var.dart';
 import 'hart_type_converter.dart';
 
@@ -20,24 +21,42 @@ class HartTransmitter {
   }) {
     final cmd = command.toRadixString(16).toUpperCase().padLeft(2, '0');
     switch (cmd) {
-      case '00': return _cmd00(device);
-      case '01': return _cmd01(device);
-      case '02': return _cmd02(device);
-      case '03': return _cmd03(device);
-      case '04': return _cmd04(device);
-      case '06': return _cmd06(device, requestBody, onWrite);
-      case '07': return _cmd07(device);
-      case '0B': return _cmd0B(device, requestBody);
-      case '0C': return _cmd0C(device);
-      case '0D': return _cmd0D(device);
-      case '0E': return _cmd0E(device);
-      case '0F': return _cmd0F(device);
-      case '10': return _cmd10(device);
-      case '11': return _cmd11(device, requestBody, onWrite);
-      case '12': return _cmd12(device, requestBody, onWrite);
-      case '13': return _cmd13(device);
-      case '15': return _cmd15(device, requestBody, onWrite);
-      default:   return _errResponse(64); // Command not implemented
+      case '00':
+        return _cmd00(device);
+      case '01':
+        return _cmd01(device);
+      case '02':
+        return _cmd02(device);
+      case '03':
+        return _cmd03(device);
+      case '04':
+        return _cmd04(device);
+      case '06':
+        return _cmd06(device, requestBody, onWrite);
+      case '07':
+        return _cmd07(device);
+      case '0B':
+        return _cmd0B(device, requestBody);
+      case '0C':
+        return _cmd0C(device);
+      case '0D':
+        return _cmd0D(device);
+      case '0E':
+        return _cmd0E(device);
+      case '0F':
+        return _cmd0F(device);
+      case '10':
+        return _cmd10(device);
+      case '11':
+        return _cmd11(device, requestBody, onWrite);
+      case '12':
+        return _cmd12(device, requestBody, onWrite);
+      case '13':
+        return _cmd13(device);
+      case '15':
+        return _cmd15(device, requestBody, onWrite);
+      default:
+        return _errResponse(64); // Command not implemented
     }
   }
 
@@ -59,7 +78,8 @@ class HartTransmitter {
     return result;
   }
 
-  static List<int> _buildResponse(List<int> statusBytes, List<List<int>> fields) {
+  static List<int> _buildResponse(
+      List<int> statusBytes, List<List<int>> fields) {
     return [...statusBytes, ...fields.expand((f) => f)];
   }
 
@@ -69,17 +89,17 @@ class HartTransmitter {
 
   // ── Identity block ────────────────────────────────────────────────────────
   static List<int> _identityBlock(Map<String, ReactVar> dev) => [
-    0xFE,
-    ..._getHex(dev, 'manufacturer_id'),
-    ..._getHex(dev, 'device_type'),
-    ..._getHex(dev, 'request_preambles'),
-    ..._getHex(dev, 'hart_revision'),
-    ..._getHex(dev, 'software_revision'),
-    ..._getHex(dev, 'transmitter_revision'),
-    ..._getHex(dev, 'hardware_revision'),
-    ..._getHex(dev, 'device_flags'),
-    ..._getHex(dev, 'device_id'),
-  ];
+        0xFE,
+        ..._getHex(dev, 'manufacturer_id'),
+        ..._getHex(dev, 'device_type'),
+        ..._getHex(dev, 'request_preambles'),
+        ..._getHex(dev, 'hart_revision'),
+        ..._getHex(dev, 'software_revision'),
+        ..._getHex(dev, 'transmitter_revision'),
+        ..._getHex(dev, 'hardware_revision'),
+        ..._getHex(dev, 'device_flags'),
+        ..._getHex(dev, 'device_id'),
+      ];
 
   // ── Commands ──────────────────────────────────────────────────────────────
 
@@ -145,7 +165,10 @@ class HartTransmitter {
   static List<int> _cmd0B(Map<String, ReactVar> dev, List<int> body) {
     // Compare body (tag bytes) with stored tag
     final tagHex = dev['tag']?.evaluatedHex ?? dev['tag']?.rawValue ?? '';
-    final bodyHex = body.map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+    final bodyHex = body
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
     final match = tagHex.toUpperCase() == bodyHex;
     return [match ? 0x00 : 0x01, ..._identityBlock(dev)];
   }
@@ -199,7 +222,10 @@ class HartTransmitter {
   static List<int> _cmd11(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
     if (body.isNotEmpty) {
-      final hex = body.map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+      final hex = body
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
       onWrite('message', hex);
     }
     return _buildResponse(_ok(), []);
@@ -209,9 +235,21 @@ class HartTransmitter {
   static List<int> _cmd12(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
     if (body.length >= 21) {
-      final tag = body.sublist(0, 6).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
-      final desc = body.sublist(6, 18).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
-      final date = body.sublist(18, 21).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+      final tag = body
+          .sublist(0, 6)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
+      final desc = body
+          .sublist(6, 18)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
+      final date = body
+          .sublist(18, 21)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
       onWrite('tag', tag);
       onWrite('descriptor', desc);
       onWrite('date', date);
@@ -235,8 +273,16 @@ class HartTransmitter {
           body[1].toRadixString(16).padLeft(2, '0').toUpperCase());
       onWrite('process_variable_unit_code',
           body[2].toRadixString(16).padLeft(2, '0').toUpperCase());
-      final upperHex = body.sublist(3, 7).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
-      final lowerHex = body.sublist(7, 11).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+      final upperHex = body
+          .sublist(3, 7)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
+      final lowerHex = body
+          .sublist(7, 11)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
       onWrite('upper_range_value', upperHex);
       onWrite('lower_range_value', lowerHex);
     }
@@ -260,7 +306,8 @@ class HartTransmitter {
           final v = allDevices[device]?[col];
           if (v == null) return '0';
           final hex = v.evaluatedHex.isEmpty ? v.rawValue : v.evaluatedHex;
-          if (v.typeStr.toUpperCase().contains('FLOAT') || v.typeStr == 'SREAL') {
+          if (v.typeStr.toUpperCase().contains('FLOAT') ||
+              v.typeStr == 'SREAL') {
             return HartTypeConverter.hexToDouble(hex).toString();
           }
           try {
@@ -282,36 +329,118 @@ class HartTransmitter {
   }
 
   static double _evalSimple(String expr) {
-    // Very simple recursive descent parser for + - * /
     expr = expr.trim();
-    // Handle parentheses
+    if (expr.isEmpty) return 0.0;
+
+    // Strip balanced outer parentheses
     if (expr.startsWith('(') && expr.endsWith(')')) {
-      return _evalSimple(expr.substring(1, expr.length - 1));
+      int d = 0;
+      bool balanced = true;
+      for (int i = 0; i < expr.length - 1; i++) {
+        if (expr[i] == '(') d++;
+        if (expr[i] == ')') d--;
+        if (d == 0) {
+          balanced = false;
+          break;
+        }
+      }
+      if (balanced) return _evalSimple(expr.substring(1, expr.length - 1));
     }
-    // Try splitting by + or - (lowest precedence, right-to-left scan to handle negatives)
+
+    // Level 1: + - (scan right-to-left)
     int depth = 0;
-    for (int i = expr.length - 1; i >= 0; i--) {
-      final c = expr[i];
-      if (c == ')') depth++;
-      if (c == '(') depth--;
-      if (depth == 0 && (c == '+' || c == '-') && i > 0) {
+    for (int i = expr.length - 1; i >= 1; i--) {
+      if (expr[i] == ')') depth++;
+      if (expr[i] == '(') depth--;
+      if (depth == 0 && (expr[i] == '+' || expr[i] == '-')) {
+        // Skip if part of scientific notation (e.g. 1.5e-3)
+        if (i > 1 && (expr[i - 1] == 'e' || expr[i - 1] == 'E')) continue;
         final left = _evalSimple(expr.substring(0, i));
         final right = _evalSimple(expr.substring(i + 1));
-        return c == '+' ? left + right : left - right;
+        return expr[i] == '+' ? left + right : left - right;
       }
     }
-    // Try splitting by * or /
+
+    // Level 2: * / but NOT ** (scan right-to-left)
     depth = 0;
-    for (int i = expr.length - 1; i >= 0; i--) {
-      final c = expr[i];
-      if (c == ')') depth++;
-      if (c == '(') depth--;
-      if (depth == 0 && (c == '*' || c == '/') && i > 0) {
-        final left = _evalSimple(expr.substring(0, i));
-        final right = _evalSimple(expr.substring(i + 1));
-        return c == '*' ? left * right : (right != 0 ? left / right : 0.0);
+    for (int i = expr.length - 1; i >= 1; i--) {
+      if (expr[i] == ')') depth++;
+      if (expr[i] == '(') depth--;
+      if (depth == 0) {
+        if (expr[i] == '/') {
+          final left = _evalSimple(expr.substring(0, i));
+          final right = _evalSimple(expr.substring(i + 1));
+          return right != 0 ? left / right : 0.0;
+        }
+        if (expr[i] == '*' &&
+            (i + 1 >= expr.length || expr[i + 1] != '*') &&
+            (expr[i - 1] != '*')) {
+          final left = _evalSimple(expr.substring(0, i));
+          final right = _evalSimple(expr.substring(i + 1));
+          return left * right;
+        }
       }
     }
+
+    // Level 3: ** power (scan left-to-right for right-associativity)
+    depth = 0;
+    for (int i = 0; i < expr.length - 1; i++) {
+      if (expr[i] == '(') depth++;
+      if (expr[i] == ')') depth--;
+      if (depth == 0 && expr[i] == '*' && expr[i + 1] == '*') {
+        final left = _evalSimple(expr.substring(0, i));
+        final right = _evalSimple(expr.substring(i + 2));
+        return math.pow(left, right).toDouble();
+      }
+    }
+
+    // Unary minus / plus
+    if (expr.startsWith('-')) return -_evalSimple(expr.substring(1));
+    if (expr.startsWith('+')) return _evalSimple(expr.substring(1));
+
+    // Function calls: fn(args)
+    final fnRe = RegExp(r'^(math\.sqrt|sqrt|exp|abs|log|ln|pow)\(');
+    final fnMatch = fnRe.firstMatch(expr);
+    if (fnMatch != null) {
+      final fn = fnMatch.group(1)!;
+      final start = fn.length + 1;
+      int d = 1, end = start;
+      while (end < expr.length && d > 0) {
+        if (expr[end] == '(') d++;
+        if (expr[end] == ')') d--;
+        end++;
+      }
+      final argStr = expr.substring(start, end - 1);
+      // pow(a,b) has two args
+      if (fn == 'pow') {
+        final commaIdx = _findTopLevelComma(argStr);
+        if (commaIdx > 0) {
+          final a = _evalSimple(argStr.substring(0, commaIdx));
+          final b = _evalSimple(argStr.substring(commaIdx + 1));
+          return math.pow(a, b).toDouble();
+        }
+      }
+      final arg = _evalSimple(argStr);
+      return switch (fn) {
+        'exp' => math.exp(arg),
+        'sqrt' || 'math.sqrt' => math.sqrt(arg.clamp(0, double.infinity)),
+        'abs' => arg.abs(),
+        'log' || 'ln' => arg > 0 ? math.log(arg) : 0.0,
+        _ => arg,
+      };
+    }
+
     return double.tryParse(expr) ?? 0.0;
+  }
+
+  /// Finds the first comma at depth 0 in [s].
+  static int _findTopLevelComma(String s) {
+    int d = 0;
+    for (int i = 0; i < s.length; i++) {
+      if (s[i] == '(') d++;
+      if (s[i] == ')') d--;
+      if (d == 0 && s[i] == ',') return i;
+    }
+    return -1;
   }
 }

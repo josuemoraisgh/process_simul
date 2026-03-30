@@ -6,7 +6,9 @@ import '../../domain/enums/db_model.dart';
 import '../../domain/repositories/i_db_repository.dart';
 import '../../infrastructure/hart/hart_type_converter.dart';
 import '../../infrastructure/hart/hart_transmitter.dart';
+import '../../infrastructure/hart/hart_transmitter.dart';
 import '../../infrastructure/simulation/simul_tf.dart';
+import 'log_notifier.dart';
 
 /// Immutable view-model for the HART table.
 class HartTableState {
@@ -252,25 +254,51 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
   }
 
   void _registerTFuncs() {
+    final wasRunning = _simul.isRunning;
     _simul.stop();
     _simul.reset();
     _simul.onChanged = () => _dirty = true;
+    int ok = 0, fail = 0;
     for (final entry in state.data.entries) {
       final device = entry.key;
       for (final v in entry.value.values) {
         if (v.model == DbModel.tFunc) {
-          _simul.register(v, () {
-            // Input: percent_of_range for this device
-            final por = state.data[device]?['percent_of_range'];
-            if (por == null) return 0.0;
-            final hex =
-                por.model == DbModel.value ? por.rawValue : por.evaluatedHex;
-            return HartTypeConverter.hexToDouble(hex);
+          // Parse the spec to get the input expression
+          final spec = TFuncSpec.parse(v.tFuncBody);
+          if (spec == null) {
+            fail++;
+            globalLog.warning('TF',
+                'Parse failed: $device.${v.colName} spec="${v.tFuncBody}"');
+            continue;
+          }
+          // Strip @ prefix from input expression (expression marker)
+          String inputExpr = spec.inputExpr;
+          if (inputExpr.startsWith('@')) {
+            inputExpr = inputExpr.substring(1);
+          }
+          final capturedExpr = inputExpr;
+          final success = _simul.register(v, () {
+            return HartTransmitter.evaluateExpr(capturedExpr, state.data);
           });
+          if (success) {
+            ok++;
+            globalLog.debug(
+                'TF', 'Registered: $device.${v.colName} input="$capturedExpr"');
+          } else {
+            fail++;
+            globalLog.warning('TF',
+                'Parse failed: $device.${v.colName} spec="${v.tFuncBody}"');
+          }
         }
       }
     }
-    _simul.start();
+    globalLog.info(
+        'TF', 'Registered $ok TF(s)${fail > 0 ? ', $fail failed' : ''}');
+    if (wasRunning && ok > 0) {
+      _simul.start();
+      globalLog.info(
+          'TF', 'TF simulation started (${_simul.stepMs.toInt()}ms)');
+    }
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────────────

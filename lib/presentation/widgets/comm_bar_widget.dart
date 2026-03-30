@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../application/providers/app_providers.dart';
+import '../../application/notifiers/log_notifier.dart';
+import '../../domain/enums/db_model.dart';
 
-/// Top bar showing HART server status, Modbus status and Hex/Human toggle.
+/// Top bar showing TF status, HART server status, Modbus status and Hex/Human toggle.
 class CommBarWidget extends ConsumerWidget {
   const CommBarWidget({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final conn     = ref.watch(connectionProvider);
-    final hart     = ref.watch(hartTableProvider);
+    final conn = ref.watch(connectionProvider);
+    final hart = ref.watch(hartTableProvider);
     final settings = ref.watch(settingsProvider);
+    final tfRunning = ref.watch(tfRunningProvider);
 
     return Container(
       height: 48,
@@ -22,20 +25,59 @@ class CommBarWidget extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
+          // ── Transfer Function ──────────────────────────────────────────
+          _StatusDot(active: tfRunning),
+          const SizedBox(width: 6),
+          Text('TF',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary)),
+          const SizedBox(width: 4),
+          Text(':${settings.tfStepMs}ms',
+              style:
+                  const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
+          const SizedBox(width: 6),
+          _SmallButton(
+            label: tfRunning ? 'Stop' : 'Start',
+            active: tfRunning,
+            onTap: () => _toggleTf(ref),
+          ),
+
+          const _VSep(),
+
           // ── HART Server ───────────────────────────────────────────────
           _StatusDot(active: conn.hartServerRunning),
           const SizedBox(width: 6),
-          const Text('HART', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary)),
-          const SizedBox(width: 4),
-          Text(':${conn.hartPort}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
+          const Text('HART',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary)),
+          const SizedBox(width: 6),
+          _SegmentedToggle(
+            options: const ['TCP', 'Serial'],
+            selected: settings.hartMode == CommMode.tcp ? 0 : 1,
+            onChanged: (i) {
+              final mode = i == 0 ? CommMode.tcp : CommMode.serial;
+              // Stop running server before switching mode
+              if (conn.hartServerRunning) {
+                ref.read(connectionProvider.notifier).stopHartServer();
+                globalLog.info('HART', 'HART server stopped (mode change)');
+              }
+              ref
+                  .read(settingsProvider.notifier)
+                  .update((s) => s.copyWith(hartMode: mode));
+              globalLog.info('HART',
+                  'Communication mode changed to ${mode == CommMode.tcp ? 'TCP' : 'Serial'}');
+            },
+          ),
           const SizedBox(width: 6),
           _SmallButton(
             label: conn.hartServerRunning ? 'Stop' : 'Start',
             active: conn.hartServerRunning,
             onTap: () => _toggleHart(ref, conn.hartServerRunning,
-                settings.hartServerPort),
+                settings.hartServerPort, settings.hartMode),
           ),
 
           const _VSep(),
@@ -43,17 +85,21 @@ class CommBarWidget extends ConsumerWidget {
           // ── Modbus Server ─────────────────────────────────────────────
           _StatusDot(active: conn.modbusRunning),
           const SizedBox(width: 6),
-          const Text('Modbus', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary)),
+          const Text('Modbus',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary)),
           const SizedBox(width: 4),
           Text(':${conn.modbusPort}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
+              style:
+                  const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
           const SizedBox(width: 6),
           _SmallButton(
             label: conn.modbusRunning ? 'Stop' : 'Start',
             active: conn.modbusRunning,
-            onTap: () => _toggleModbus(ref, conn.modbusRunning,
-                settings.modbusPort),
+            onTap: () =>
+                _toggleModbus(ref, conn.modbusRunning, settings.modbusPort),
           ),
 
           const _VSep(),
@@ -71,8 +117,8 @@ class CommBarWidget extends ConsumerWidget {
           const Spacer(),
 
           // ── Human / Hex toggle ────────────────────────────────────────
-          const Text('View:', style: TextStyle(fontSize: 12,
-              color: AppColors.textSecondary)),
+          const Text('View:',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
           const SizedBox(width: 6),
           _SegmentedToggle(
             options: const ['Human', 'Hex'],
@@ -85,10 +131,35 @@ class CommBarWidget extends ConsumerWidget {
     );
   }
 
-  void _toggleHart(WidgetRef ref, bool running, int port) {
+  void _toggleTf(WidgetRef ref) {
+    final simul = ref.read(simulTfProvider);
+    final running = ref.read(tfRunningProvider);
+    if (running) {
+      simul.stop();
+      globalLog.info('TF', 'Transfer Function stopped');
+    } else {
+      simul.start();
+      globalLog.info(
+          'TF', 'Transfer Function started (${simul.stepMs.toInt()}ms)');
+    }
+    ref.read(tfRunningProvider.notifier).state = !running;
+  }
+
+  Future<void> _toggleHart(
+      WidgetRef ref, bool running, int port, CommMode mode) async {
     final notifier = ref.read(connectionProvider.notifier);
     if (running) {
-      notifier.stopHartServer();
+      await notifier.stopHartServer();
+      globalLog.info('HART', 'HART server stopped');
+    } else if (mode == CommMode.serial) {
+      final serialPort = ref.read(settingsProvider).hartSerialPort;
+      final hartNotifier = ref.read(hartTableProvider.notifier);
+      notifier.startHartSerial(
+        serialPort,
+        () => ref.read(hartTableProvider).data,
+        (device, col, hex) => hartNotifier.setCellValue(device, col, hex),
+      );
+      globalLog.info('HART', 'HART Serial opening $serialPort');
     } else {
       final hartNotifier = ref.read(hartTableProvider.notifier);
       notifier.startHartServer(
@@ -96,12 +167,19 @@ class CommBarWidget extends ConsumerWidget {
         () => ref.read(hartTableProvider).data,
         (device, col, hex) => hartNotifier.setCellValue(device, col, hex),
       );
+      globalLog.info('HART', 'HART TCP server started on port $port');
     }
   }
 
   void _toggleModbus(WidgetRef ref, bool running, int port) {
     final notifier = ref.read(connectionProvider.notifier);
-    running ? notifier.stopModbus() : notifier.startModbus(port);
+    if (running) {
+      notifier.stopModbus();
+      globalLog.info('Modbus', 'Modbus server stopped');
+    } else {
+      notifier.startModbus(port);
+      globalLog.info('Modbus', 'Modbus server started on port $port');
+    }
   }
 }
 
@@ -113,13 +191,18 @@ class _StatusDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 8, height: 8,
+        width: 8,
+        height: 8,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: active ? AppColors.connected : AppColors.disconnected,
           boxShadow: active
-              ? [BoxShadow(color: AppColors.connected.withValues(alpha: 0.5),
-                  blurRadius: 4, spreadRadius: 1)]
+              ? [
+                  BoxShadow(
+                      color: AppColors.connected.withValues(alpha: 0.5),
+                      blurRadius: 4,
+                      spreadRadius: 1)
+                ]
               : null,
         ),
       );
@@ -127,10 +210,10 @@ class _StatusDot extends StatelessWidget {
 
 class _SmallButton extends StatelessWidget {
   final String label;
-  final bool   active;
+  final bool active;
   final VoidCallback onTap;
-  const _SmallButton({required this.label, required this.active,
-      required this.onTap});
+  const _SmallButton(
+      {required this.label, required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -139,8 +222,9 @@ class _SmallButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           decoration: BoxDecoration(
-            color: active ? AppColors.error.withValues(alpha: 0.15)
-                          : AppColors.success.withValues(alpha: 0.15),
+            color: active
+                ? AppColors.error.withValues(alpha: 0.15)
+                : AppColors.success.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(4),
             border: Border.all(
               color: active ? AppColors.error : AppColors.success,
@@ -163,7 +247,8 @@ class _VSep extends StatelessWidget {
   const _VSep();
   @override
   Widget build(BuildContext context) => Container(
-        width: 1, height: 24,
+        width: 1,
+        height: 24,
         margin: const EdgeInsets.symmetric(horizontal: 10),
         color: AppColors.borderDark,
       );
@@ -187,11 +272,9 @@ class _SegmentedToggle extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: isSelected
-                  ? AppColors.primary
-                  : AppColors.cardDark,
+              color: isSelected ? AppColors.primary : AppColors.cardDark,
               borderRadius: BorderRadius.horizontal(
-                left:  Radius.circular(i == 0 ? 5 : 0),
+                left: Radius.circular(i == 0 ? 5 : 0),
                 right: Radius.circular(i == options.length - 1 ? 5 : 0),
               ),
               border: Border.all(color: AppColors.borderDark),

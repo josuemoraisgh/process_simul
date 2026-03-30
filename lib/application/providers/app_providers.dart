@@ -20,9 +20,12 @@ final dbRepositoryProvider = Provider<IDbRepository>((ref) {
 });
 
 final simulTfProvider = Provider<SimulTf>((ref) {
-  final stepMs = ref.watch(settingsProvider).tfStepMs;
+  final stepMs = ref.watch(settingsProvider.select((s) => s.tfStepMs));
   return SimulTf(stepMs: stepMs.toDouble());
 });
+
+/// Whether the TF simulation is currently running (drives UI only).
+final tfRunningProvider = StateProvider<bool>((_) => false);
 
 // ── Settings ────────────────────────────────────────────────────────────────
 final settingsProvider = StateNotifierProvider<SettingsNotifier, AppSettings>(

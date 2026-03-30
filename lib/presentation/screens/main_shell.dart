@@ -17,10 +17,11 @@ class _MainShellState extends ConsumerState<MainShell> {
   int _selectedIndex = 0;
 
   static const _destinations = [
-    (icon: Icons.table_chart_outlined, label: 'HART',     path: '/hart'),
-    (icon: Icons.settings_ethernet,    label: 'Modbus',   path: '/modbus'),
-    (icon: Icons.tune,                 label: 'Settings', path: '/settings'),
-    (icon: Icons.receipt_long_outlined, label: 'Logs',   path: '/logs'),
+    (icon: Icons.view_in_ar, label: '3D', path: '/tank3d'),
+    (icon: Icons.table_chart_outlined, label: 'HART', path: '/hart'),
+    (icon: Icons.settings_ethernet, label: 'Modbus', path: '/modbus'),
+    (icon: Icons.tune, label: 'Settings', path: '/settings'),
+    (icon: Icons.receipt_long_outlined, label: 'Logs', path: '/logs'),
   ];
 
   void _onDestination(int index) {
@@ -56,12 +57,14 @@ class _MainShellState extends ConsumerState<MainShell> {
   AppBar _buildAppBar(BuildContext context) => AppBar(
         title: Row(children: [
           Container(
-            width: 28, height: 28,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               color: AppColors.primary,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Icon(Icons.developer_board, color: Colors.white, size: 16),
+            child: const Icon(Icons.developer_board,
+                color: Colors.white, size: 16),
           ),
           const SizedBox(width: 10),
           const Text('ProcessSimul'),
