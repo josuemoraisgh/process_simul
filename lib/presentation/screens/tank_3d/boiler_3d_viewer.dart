@@ -1,20 +1,27 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_3d_controller/flutter_3d_controller.dart';
+import 'package:flutter_3d_controller/src/core/modules/model_viewer/model_viewer.dart';
+import 'package:flutter_3d_controller/src/data/datasources/i_flutter_3d_datasource.dart';
+import 'package:flutter_3d_controller/src/data/repositories/flutter_3d_repository.dart';
+import 'package:flutter_3d_controller/src/utils/utils.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'boiler_state.dart';
 
-/// 3D Boiler viewer using flutter_3d_controller.
-/// Works on Android, iOS, Windows, macOS, Linux, and Web
-/// (all via model-viewer / flutter_inappwebview).
+/// 3D Boiler viewer using ModelViewer directly for full control
+/// over background, lighting, environment, and shadow.
 class Boiler3dViewer extends StatefulWidget {
   final BoilerState state;
   final ValueChanged<BoilerState>? onStateChanged;
   final bool showControls;
+  final VoidCallback? onEscapePressed;
 
   const Boiler3dViewer({
     super.key,
     required this.state,
     this.onStateChanged,
     this.showControls = false,
+    this.onEscapePressed,
   });
 
   @override
@@ -23,12 +30,19 @@ class Boiler3dViewer extends StatefulWidget {
 
 class _Boiler3dViewerState extends State<Boiler3dViewer> {
   late final Flutter3DController _controller;
+  late final String _id;
+  final Utils _utils = Utils();
   bool _isLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _id = _utils.generateId();
     _controller = Flutter3DController();
+    if (kIsWeb) {
+      _controller
+          .init(Flutter3DRepository(IFlutter3DDatasource(_id, null, false)));
+    }
   }
 
   @override
@@ -49,14 +63,66 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
   }
 
   @override
+  void dispose() {
+    _controller.onModelLoaded.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Flutter3DViewer(
-      controller: _controller,
+    return ModelViewer(
+      id: _id,
       src: 'assets/models/boiler.glb',
-      onLoad: (_) {
+      backgroundColor: const Color(0xFF0d1117),
+      environmentImage: 'neutral',
+      exposure: 1.0,
+      shadowIntensity: 0.4,
+      shadowSoftness: 0.8,
+      cameraControls: true,
+      autoRotate: true,
+      autoRotateDelay: 2000,
+      rotationPerSecond: '10deg',
+      cameraOrbit: '45deg 55deg 105%',
+      interactionPrompt: InteractionPrompt.none,
+      disableTap: true,
+      ar: false,
+      autoPlay: false,
+      debugLogging: false,
+      activeGestureInterceptor: true,
+      relatedJs: _utils.injectedJS(_id, 'flutter-3d-controller'),
+      onProgress: null,
+      onLoad: (modelAddress) {
+        _controller.onModelLoaded.value = true;
         setState(() => _isLoaded = true);
         _syncModelState();
       },
+      onError: (error) {
+        _controller.onModelLoaded.value = false;
+        debugPrint('Boiler3dViewer error: $error');
+      },
+      onWebViewCreated: kIsWeb
+          ? null
+          : (InAppWebViewController webViewController) {
+              _controller.init(
+                Flutter3DRepository(
+                  IFlutter3DDatasource(_id, webViewController, true),
+                ),
+              );
+              if (widget.onEscapePressed != null) {
+                webViewController.addJavaScriptHandler(
+                  handlerName: 'onEscapePressed',
+                  callback: (_) => widget.onEscapePressed!(),
+                );
+                webViewController.evaluateJavascript(source: '''
+                  document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      window.flutter_inappwebview.callHandler('onEscapePressed');
+                    }
+                  });
+                ''');
+              }
+            },
     );
   }
 }

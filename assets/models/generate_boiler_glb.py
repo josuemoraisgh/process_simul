@@ -50,8 +50,9 @@ scene = bpy.context.scene
 
 # ─── Materials ────────────────────────────────────────────────────────────────
 
-def create_pbr_material(name, base_color, metallic=0.9, roughness=0.35, alpha=1.0):
-    """Create a PBR material (Principled BSDF)."""
+def create_pbr_material(name, base_color, metallic=0.9, roughness=0.35, alpha=1.0,
+                        emission_color=None, emission_strength=0.0):
+    """Create a PBR material (Principled BSDF) compatible with glTF 2.0 export."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     mat.use_backface_culling = True
@@ -63,8 +64,20 @@ def create_pbr_material(name, base_color, metallic=0.9, roughness=0.35, alpha=1.
     bsdf.inputs['Roughness'].default_value = roughness
     if alpha < 1.0:
         bsdf.inputs['Alpha'].default_value = alpha
-        mat.blend_method = 'BLEND'
-        mat.shadow_method = 'CLIP'
+        # Blender 4.x removed blend_method; use try/except for compatibility
+        try:
+            mat.blend_method = 'BLEND'
+            mat.shadow_method = 'CLIP'
+        except AttributeError:
+            pass  # Blender 4.x+: alpha mode is inferred by glTF exporter
+    if emission_color and emission_strength > 0:
+        # Emission input name varies by Blender version
+        for em_name in ['Emission Color', 'Emission']:
+            if em_name in bsdf.inputs:
+                bsdf.inputs[em_name].default_value = (*emission_color, 1.0)
+                break
+        if 'Emission Strength' in bsdf.inputs:
+            bsdf.inputs['Emission Strength'].default_value = emission_strength
     output = nodes.new('ShaderNodeOutputMaterial')
     mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
     return mat
@@ -75,7 +88,8 @@ mat_steel_dark = create_pbr_material('Steel_Dark', (0.3, 0.32, 0.34), metallic=0
 mat_steel_worn = create_pbr_material('Steel_Worn', (0.55, 0.52, 0.48), metallic=0.8, roughness=0.5)
 mat_refractory = create_pbr_material('Refractory_Brick', (0.25, 0.12, 0.08), metallic=0.0, roughness=0.9)
 mat_water = create_pbr_material('Water', (0.15, 0.55, 0.85), metallic=0.0, roughness=0.1, alpha=0.6)
-mat_flame_orange = create_pbr_material('Flame_Orange', (1.0, 0.5, 0.0), metallic=0.0, roughness=0.9)
+mat_flame_orange = create_pbr_material('Flame_Orange', (1.0, 0.5, 0.0), metallic=0.0, roughness=0.9,
+                                       emission_color=(1.0, 0.4, 0.0), emission_strength=5.0)
 mat_glass = create_pbr_material('Glass', (0.8, 0.9, 1.0), metallic=0.0, roughness=0.05, alpha=0.3)
 mat_copper = create_pbr_material('Copper_Pipe', (0.72, 0.45, 0.2), metallic=0.95, roughness=0.35)
 mat_red_sensor = create_pbr_material('Sensor_Red', (0.8, 0.1, 0.1), metallic=0.5, roughness=0.4)
@@ -491,19 +505,27 @@ for obj in bpy.data.objects:
 # Export as GLB
 output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'boiler.glb')
 
-bpy.ops.export_scene.gltf(
+# glTF export with version-compatible parameters
+export_args = dict(
     filepath=output_path,
     export_format='GLB',
     use_selection=False,
     export_apply=True,
-    export_animations=True,
     export_cameras=False,
     export_lights=False,
     export_materials='EXPORT',
     export_normals=True,
-    export_tangentials=False,
-    export_draco_mesh_compression_enable=False,
 )
+# Parameters that may not exist in all Blender versions
+try:
+    bpy.ops.export_scene.gltf(**export_args,
+        export_animations=True,
+        export_tangentials=False,
+        export_draco_mesh_compression_enable=False,
+    )
+except TypeError:
+    # Fallback for Blender versions with different parameter names
+    bpy.ops.export_scene.gltf(**export_args)
 
 print(f'\n✅ Model exported to: {output_path}')
 print(f'   Objects: {len(bpy.data.objects)}')

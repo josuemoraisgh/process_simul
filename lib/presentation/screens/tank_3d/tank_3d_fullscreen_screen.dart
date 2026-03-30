@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:window_manager/window_manager.dart';
 import 'boiler_3d_viewer.dart';
@@ -20,8 +21,18 @@ class _Tank3dFullscreenScreenState extends State<Tank3dFullscreenScreen> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKey);
     _scheduleHideUI();
     _enterFullscreen();
+  }
+
+  bool _handleKey(KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      _goBack();
+      return true;
+    }
+    return false;
   }
 
   Future<void> _enterFullscreen() async {
@@ -45,8 +56,14 @@ class _Tank3dFullscreenScreenState extends State<Tank3dFullscreenScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKey);
     _exitFullscreen();
     super.dispose();
+  }
+
+  void _goBack() async {
+    await _exitFullscreen();
+    if (mounted) context.pop();
   }
 
   @override
@@ -76,12 +93,13 @@ class _Tank3dFullscreenScreenState extends State<Tank3dFullscreenScreen> {
                 state: _state,
                 onStateChanged: (s) => setState(() => _state = s),
                 showControls: false,
+                onEscapePressed: _goBack,
               ),
             ),
-            // Back button
+            // Exit fullscreen button (top-right)
             Positioned(
-              top: 20,
-              left: 20,
+              top: 12,
+              right: 12,
               child: AnimatedOpacity(
                 opacity: _showUI ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 300),
@@ -89,27 +107,14 @@ class _Tank3dFullscreenScreenState extends State<Tank3dFullscreenScreen> {
                   ignoring: !_showUI,
                   child: Material(
                     color: Colors.black45,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () async {
-                        await _exitFullscreen();
-                        if (context.mounted) context.pop();
-                      },
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: _goBack,
                       child: const Padding(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.arrow_back_rounded,
-                                color: Colors.white70, size: 18),
-                            SizedBox(width: 8),
-                            Text('Voltar',
-                                style: TextStyle(
-                                    color: Colors.white70, fontSize: 14)),
-                          ],
-                        ),
+                        padding: EdgeInsets.all(8),
+                        child: Icon(Icons.fullscreen_exit,
+                            color: Colors.white70, size: 22),
                       ),
                     ),
                   ),
