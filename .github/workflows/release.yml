@@ -1,4 +1,4 @@
-name: Build & Release (Windows) - process_simul
+name: Build & Release (Windows MSI) - process_simul
 
 on:
   workflow_dispatch:
@@ -23,11 +23,11 @@ permissions:
 env:
   VERSION: ${{ github.event.inputs.version }}
   FLUTTER_VERSION: "3.41.5"
-  ZIP_NAME: process_simul-${{ github.event.inputs.version }}-windows.zip
+  MSI_NAME: process_simul-${{ github.event.inputs.version }}-windows.msi
 
 jobs:
-  build-windows:
-    name: Windows (Flutter + ZIP Release)
+  build-windows-msi:
+    name: Windows (Flutter + WiX MSI)
     runs-on: windows-latest
 
     steps:
@@ -50,16 +50,16 @@ jobs:
         run: |
           echo "Verificando arquivos do projeto..."
           if [ ! -f "pubspec.yaml" ]; then
-            echo "❌ pubspec.yaml não encontrado"
-            exit 1
+            echo "❌ pubspec.yaml não encontrado"; exit 1
           fi
           if [ ! -d "windows" ]; then
-            echo "❌ Pasta windows/ não encontrada"
-            exit 1
+            echo "❌ Pasta windows/ não encontrada"; exit 1
           fi
           if [ ! -d "lib" ]; then
-            echo "❌ Pasta lib/ não encontrada"
-            exit 1
+            echo "❌ Pasta lib/ não encontrada"; exit 1
+          fi
+          if [ ! -f "windows/installer/product.wxs" ]; then
+            echo "❌ windows/installer/product.wxs não encontrado"; exit 1
           fi
           echo "✅ Estrutura do projeto OK"
 
@@ -73,91 +73,152 @@ jobs:
       - name: Verificar versões instaladas
         shell: bash
         run: |
-          echo "Flutter:"
-          flutter --version
-          echo ""
-          echo "Dart:"
-          dart --version
+          echo "Flutter:"; flutter --version
+          echo "Dart:";    dart --version
 
       - name: Habilitar suporte a Windows
         run: flutter config --enable-windows-desktop
 
       - name: Instalar dependências
-        shell: bash
-        run: |
-          echo "Executando flutter pub get..."
-          flutter pub get
-          echo "✅ Dependências instaladas"
+        run: flutter pub get
 
       - name: Analisar código
         shell: bash
+        run: flutter analyze --no-fatal-infos || true
+
+      - name: Normalizar versão (X.Y.Z.W)
+        id: ver
+        shell: bash
         run: |
-          echo "Analisando código..."
-          flutter analyze --no-fatal-infos || true
-          echo "✅ Análise concluída"
+          CLEAN="${VERSION#v}"
+          BASE="${CLEAN%%-*}"
+          PARTS=$(echo "$BASE" | awk -F. '{print NF}')
+          if [ "$PARTS" -eq 3 ]; then
+            WIX="${BASE}.0"
+          elif [ "$PARTS" -eq 2 ]; then
+            WIX="${BASE}.0.0"
+          elif [ "$PARTS" -eq 1 ]; then
+            WIX="${BASE}.0.0.0"
+          else
+            WIX="$BASE"
+          fi
+          echo "base_version=$BASE" >> "$GITHUB_OUTPUT"
+          echo "wix_version=$WIX"   >> "$GITHUB_OUTPUT"
+          echo "✅ base=$BASE  wix=$WIX"
 
       - name: Atualizar versão no pubspec.yaml
         shell: bash
         run: |
-          VERSION_CLEAN="${VERSION#v}"
           BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-          echo "Atualizando versão para: $VERSION_CLEAN+$BUILD_NUMBER"
-          sed -i "s/^version: .*/version: ${VERSION_CLEAN}+${BUILD_NUMBER}/" pubspec.yaml
+          BASE="${{ steps.ver.outputs.base_version }}"
+          sed -i "s/^version: .*/version: ${BASE}+${BUILD_NUMBER}/" pubspec.yaml
           echo "✅ pubspec.yaml atualizado"
           grep "^version:" pubspec.yaml
 
       - name: Compilar Windows Release
         shell: bash
         run: |
-          echo "Compilando build Windows release..."
           flutter build windows --release \
-            --build-name="${VERSION#v}" \
+            --build-name="${{ steps.ver.outputs.base_version }}" \
             --build-number="${GITHUB_RUN_NUMBER}"
-          echo "✅ Compilação concluída"
 
       - name: Localizar build gerado
         id: find-build
         shell: bash
         run: |
-          echo "Procurando saída do build..."
           BUILD_DIR="build/windows/x64/runner/Release"
           if [ ! -d "$BUILD_DIR" ]; then
             echo "❌ Diretório de build não encontrado: $BUILD_DIR"
             find build -type d -name "Release" 2>/dev/null
             exit 1
           fi
+          if [ ! -f "$BUILD_DIR/process_simul.exe" ]; then
+            echo "❌ Executável process_simul.exe não encontrado em $BUILD_DIR"
+            ls -la "$BUILD_DIR"
+            exit 1
+          fi
           echo "✅ Build encontrado em: $BUILD_DIR"
-          ls -lh "$BUILD_DIR"
           echo "build_dir=$BUILD_DIR" >> $GITHUB_OUTPUT
 
-      - name: Empacotar release em ZIP
+      - name: Adicionar WiX Toolset ao PATH
+        shell: pwsh
+        run: |
+          $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory `
+                    | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $wixDir) {
+            Write-Output "WiX não encontrado, instalando via Chocolatey..."
+            choco install wixtoolset -y --no-progress
+            $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory `
+                      | Sort-Object Name -Descending | Select-Object -First 1
+          }
+          if (-not $wixDir) {
+            throw "Falha ao localizar WiX Toolset após instalação."
+          }
+          $wixBin = Join-Path $wixDir.FullName "bin"
+          Write-Output "WiX encontrado em: $wixBin"
+          Add-Content -Path $env:GITHUB_PATH -Value $wixBin
+
+      - name: Coletar arquivos do build (heat.exe)
         shell: pwsh
         run: |
           $buildDir = "${{ steps.find-build.outputs.build_dir }}"
+          New-Item -ItemType Directory -Force -Path "windows\installer\obj" | Out-Null
+          heat.exe dir $buildDir `
+            -nologo -srd -scom -sreg -sfrag -suid -gg `
+            -cg HarvestedFiles `
+            -dr INSTALLFOLDER `
+            -var var.BuildDir `
+            -ag `
+            -out "windows\installer\harvested.wxs"
+          Write-Output "✅ harvested.wxs gerado"
+
+      - name: Compilar WiX (candle.exe)
+        shell: pwsh
+        run: |
+          $buildDir = (Resolve-Path "${{ steps.find-build.outputs.build_dir }}").Path
+          $appExe   = Join-Path $buildDir "process_simul.exe"
+          $wixVer   = "${{ steps.ver.outputs.wix_version }}"
+          candle.exe -nologo -arch x86 `
+            "-dProductVersion=$wixVer" `
+            "-dBuildDir=$buildDir" `
+            "-dAppExe=$appExe" `
+            "windows\installer\product.wxs" `
+            "windows\installer\harvested.wxs" `
+            -out "windows\installer\obj\"
+          Write-Output "✅ candle concluído"
+
+      - name: Vincular MSI (light.exe)
+        shell: pwsh
+        run: |
           New-Item -ItemType Directory -Force -Path "release" | Out-Null
-          $zipPath = "release/$env:ZIP_NAME"
-          Compress-Archive -Path "$buildDir/*" -DestinationPath $zipPath -Force
-          $size = (Get-Item $zipPath).Length / 1MB
-          Write-Host ("✅ ZIP criado: {0} ({1:N2} MB)" -f $zipPath, $size)
+          $outMsi = "release\$env:MSI_NAME"
+          light.exe -nologo `
+            -ext WixUIExtension `
+            -ext WixUtilExtension `
+            -sval `
+            -b "${{ steps.find-build.outputs.build_dir }}" `
+            "windows\installer\obj\product.wixobj" `
+            "windows\installer\obj\harvested.wixobj" `
+            -out $outMsi
+          $size = (Get-Item $outMsi).Length / 1MB
+          Write-Output ("✅ MSI gerado: {0} ({1:N2} MB)" -f $outMsi, $size)
 
       - name: Verificação final do pacote
         shell: bash
         run: |
-          echo "=== Verificação final ==="
-          ZIP_FILE="release/$ZIP_NAME"
-          if [ -f "$ZIP_FILE" ]; then
-            SIZE=$(du -sh "$ZIP_FILE" | cut -f1)
-            echo "✅ $ZIP_NAME ($SIZE)"
+          MSI_FILE="release/$MSI_NAME"
+          if [ -f "$MSI_FILE" ]; then
+            SIZE=$(du -sh "$MSI_FILE" | cut -f1)
+            echo "✅ $MSI_NAME ($SIZE)"
           else
-            echo "❌ ZIP ausente: $ZIP_FILE"
-            exit 1
+            echo "❌ MSI ausente: $MSI_FILE"; exit 1
           fi
 
       - name: Upload artefato
         uses: actions/upload-artifact@v4
         with:
-          name: process_simul-${{ env.VERSION }}-windows
-          path: release/${{ env.ZIP_NAME }}
+          name: process_simul-${{ env.VERSION }}-windows-msi
+          path: release/${{ env.MSI_NAME }}
           if-no-files-found: error
 
       - name: Criar Release no GitHub
@@ -169,7 +230,12 @@ jobs:
             ${{ github.event.inputs.notes }}
 
             ## 📦 Download
-            - **Windows ZIP**: `${{ env.ZIP_NAME }}`
+            - **Windows Installer**: `${{ env.MSI_NAME }}`
+
+            ## 🛠️ Instalação
+            - Instala em `C:\Program Files (x86)\process_simul`
+            - Cria atalho na **Área de Trabalho**
+            - Cria atalho no **Menu Iniciar** (pasta "Process Simul")
 
             ## 💻 Requisitos
             - Windows 10 / 11 (x64)
@@ -179,10 +245,7 @@ jobs:
             - Flutter: ${{ env.FLUTTER_VERSION }}
             - Build number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
-
-            ## 📝 Changelog
-            Veja as mudanças nesta versão nos commits abaixo.
           prerelease: ${{ github.event.inputs.prerelease }}
-          files: release/${{ env.ZIP_NAME }}
+          files: release/${{ env.MSI_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

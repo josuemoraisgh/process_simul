@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 3.x installer for process_simul.
+  Installs to "C:\Program Files (x86)\process_simul" and creates a desktop
+  shortcut plus a Start Menu shortcut.
+
+  Required preprocessor variables (passed via candle.exe -d):
+    ProductVersion : X.Y.Z.W (e.g. 1.0.0.0)
+    BuildDir       : Absolute path to build\windows\x64\runner\Release
+    AppExe         : Absolute path to process_simul.exe (inside BuildDir)
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Process Simul"
+           Language="1046"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Josue Morais"
+           UpgradeCode="6E1B4D9A-3E2C-4D7B-9F1A-1C5E8B7A2F40">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x86"
+             Description="Process Simul - Industrial Process Simulator"
+             Manufacturer="Josue Morais" />
+
+    <MajorUpgrade DowngradeErrorMessage="Uma versão mais recente do Process Simul já está instalada." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- ── Diretórios ──────────────────────────────────────────────── -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <!-- Program Files (x86) -->
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="process_simul" />
+      </Directory>
+
+      <!-- Menu Iniciar -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Process Simul" />
+      </Directory>
+
+      <!-- Desktop -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <!-- ── Atalho no Menu Iniciar ─────────────────────────────────── -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="A1B2C3D4-1111-2222-3333-444455556666">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Process Simul"
+                  Description="Industrial Process Simulator"
+                  Target="[INSTALLFOLDER]process_simul.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder"
+                      Directory="ApplicationProgramsFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\ProcessSimul"
+                       Name="StartMenu"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ── Atalho na Área de Trabalho ─────────────────────────────── -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="B1B2C3D4-1111-2222-3333-444455556777">
+        <Shortcut Id="DesktopShortcutItem"
+                  Name="Process Simul"
+                  Description="Industrial Process Simulator"
+                  Target="[INSTALLFOLDER]process_simul.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\ProcessSimul"
+                       Name="Desktop"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ── Feature ────────────────────────────────────────────────── -->
+    <Feature Id="MainFeature" Title="Process Simul" Level="1">
+      <ComponentGroupRef Id="HarvestedFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- UI padrão com EULA opcional -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+  </Product>
+</Wix>
