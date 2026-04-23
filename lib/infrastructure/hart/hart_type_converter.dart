@@ -58,8 +58,9 @@ class HartTypeConverter {
       if (t.contains('FLOAT') || t == 'SREAL') {
         return _human2sreal(double.parse(value));
       }
-      if (t.contains('UNSIGNED'))
+      if (t.contains('UNSIGNED')) {
         return _human2uint(int.parse(value), byteSize);
+      }
       if (t.contains('INTEGER')) return _human2int(int.parse(value), byteSize);
       if (t.contains('PACKED')) return _human2pascii(value, byteSize);
       if (t.contains('DATE')) return _human2date(value, byteSize);
@@ -261,7 +262,9 @@ class HartTypeConverter {
       }
     }
     if (accBits > 0) out.add((acc << (8 - accBits)) & 0xFF);
-    while (out.length < byteSize) out.add(0);
+    while (out.length < byteSize) {
+      out.add(0);
+    }
     return out
         .take(byteSize)
         .map((b) => b.toRadixString(16).padLeft(2, '0'))

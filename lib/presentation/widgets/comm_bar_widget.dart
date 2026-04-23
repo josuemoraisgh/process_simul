@@ -28,8 +28,8 @@ class CommBarWidget extends ConsumerWidget {
           // ── Transfer Function ──────────────────────────────────────────
           _StatusDot(active: tfRunning),
           const SizedBox(width: 6),
-          Text('TF',
-              style: const TextStyle(
+          const Text('TF',
+              style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textSecondary)),

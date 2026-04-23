@@ -125,12 +125,16 @@ class HartSerialServer {
   // ── Frame extraction (identical logic to HartCommServer._flush) ──────────
   void _flush() {
     // Consume until preamble
-    while (_buf.isNotEmpty && _buf.first != 0xFF) _buf.removeAt(0);
+    while (_buf.isNotEmpty && _buf.first != 0xFF) {
+      _buf.removeAt(0);
+    }
     if (_buf.length < 6) return;
 
     // Find end of preamble
     int pos = 0;
-    while (pos < _buf.length && _buf[pos] == 0xFF) pos++;
+    while (pos < _buf.length && _buf[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= _buf.length) return;
 
     final delim = _buf[pos];
@@ -154,7 +158,9 @@ class HartSerialServer {
   // ── Frame processing (identical logic to HartCommServer._handleFrame) ────
   void _handleFrame(List<int> raw) {
     int pos = 0;
-    while (pos < raw.length && raw[pos] == 0xFF) pos++;
+    while (pos < raw.length && raw[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= raw.length) return;
 
     final delim = raw[pos];
@@ -279,7 +285,9 @@ class HartSerialServer {
       for (int i = 0; i + 1 < diHex.length; i += 2) {
         diBytes.add(int.parse(diHex.substring(i, i + 2), radix: 16));
       }
-      while (diBytes.length < 3) diBytes.add(0);
+      while (diBytes.length < 3) {
+        diBytes.add(0);
+      }
       return [
         (reqAddrBytes[0] & 0xC0) | (mfg & 0x3F),
         dt,
@@ -307,7 +315,9 @@ class HartSerialServer {
     ];
 
     int cs = 0;
-    for (final b in payload) cs ^= b;
+    for (final b in payload) {
+      cs ^= b;
+    }
 
     final packet = Uint8List.fromList([
       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // preamble

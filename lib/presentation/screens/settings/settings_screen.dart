@@ -92,7 +92,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   List<String> _fallbackPorts() {
     final ports = <String>[];
-    for (int i = 1; i <= 20; i++) ports.add('COM$i');
+    for (int i = 1; i <= 20; i++) {
+      ports.add('COM$i');
+    }
     // Add common virtual com0com ports
     for (int i = 0; i <= 3; i++) {
       ports.add('CNCA$i');
@@ -389,14 +391,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               const _SectionTitle(icon: Icons.info_outline, label: 'About'),
               const SizedBox(height: 12),
 
-              _SettingsCard(children: [
-                const _InfoRow(label: 'Version', value: '1.0.0'),
-                const Divider(),
-                const _InfoRow(label: 'Protocol', value: 'HART 5 · Modbus TCP'),
-                const Divider(),
-                const _InfoRow(label: 'Author', value: 'Josué Morais'),
-                const Divider(),
-                const _InfoRow(label: 'Platform', value: 'Windows & Android'),
+              const _SettingsCard(children: [
+                _InfoRow(label: 'Version', value: '1.0.0'),
+                Divider(),
+                _InfoRow(label: 'Protocol', value: 'HART 5 · Modbus TCP'),
+                Divider(),
+                _InfoRow(label: 'Author', value: 'Josué Morais'),
+                Divider(),
+                _InfoRow(label: 'Platform', value: 'Windows & Android'),
               ]),
 
               const SizedBox(height: 32),

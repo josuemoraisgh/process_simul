@@ -50,7 +50,9 @@ class HartFrame {
 
     // Checksum = XOR of all payload bytes
     int cs = 0;
-    for (final b in payload) cs ^= b;
+    for (final b in payload) {
+      cs ^= b;
+    }
 
     final preamble = List.filled(preambleCount, 0xFF);
     return Uint8List.fromList([...preamble, ...payload, cs]);
@@ -61,7 +63,9 @@ class HartFrame {
   static HartFrame? parse(Uint8List bytes) {
     // Skip preamble (0xFF bytes)
     int pos = 0;
-    while (pos < bytes.length && bytes[pos] == 0xFF) pos++;
+    while (pos < bytes.length && bytes[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= bytes.length) return null;
 
     final delim = bytes[pos++];
@@ -113,7 +117,9 @@ class HartFrame {
   static bool verifyChecksum(Uint8List bytes) {
     if (bytes.isEmpty) return false;
     int cs = 0;
-    for (int i = 0; i < bytes.length - 1; i++) cs ^= bytes[i];
+    for (int i = 0; i < bytes.length - 1; i++) {
+      cs ^= bytes[i];
+    }
     return cs == bytes.last;
   }
 
@@ -124,11 +130,15 @@ class HartFrame {
   static HartFrame? feedBytes(List<int> incoming) {
     _buf.addAll(incoming);
     // Look for preamble start
-    while (_buf.isNotEmpty && _buf[0] != 0xFF) _buf.removeAt(0);
+    while (_buf.isNotEmpty && _buf[0] != 0xFF) {
+      _buf.removeAt(0);
+    }
     if (_buf.length < 5) return null;
     // Skip all preamble bytes
     int pos = 0;
-    while (pos < _buf.length && _buf[pos] == 0xFF) pos++;
+    while (pos < _buf.length && _buf[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= _buf.length) return null;
     // Determine frame type
     final delim = _buf[pos];

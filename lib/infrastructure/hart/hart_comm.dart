@@ -84,12 +84,16 @@ class HartCommServer {
   // ── Frame extraction ─────────────────────────────────────────────────────
   void _flush(List<int> buf, Socket socket) {
     // Consume until preamble
-    while (buf.isNotEmpty && buf.first != 0xFF) buf.removeAt(0);
+    while (buf.isNotEmpty && buf.first != 0xFF) {
+      buf.removeAt(0);
+    }
     if (buf.length < 6) return;
 
     // Find end of preamble
     int pos = 0;
-    while (pos < buf.length && buf[pos] == 0xFF) pos++;
+    while (pos < buf.length && buf[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= buf.length) return;
 
     final delim = buf[pos];
@@ -114,7 +118,9 @@ class HartCommServer {
   // ── Frame processing ──────────────────────────────────────────────────────
   void _handleFrame(List<int> raw, Socket socket) {
     int pos = 0;
-    while (pos < raw.length && raw[pos] == 0xFF) pos++;
+    while (pos < raw.length && raw[pos] == 0xFF) {
+      pos++;
+    }
     if (pos >= raw.length) return;
 
     final delim = raw[pos++];
@@ -231,7 +237,9 @@ class HartCommServer {
       for (int i = 0; i + 1 < diHex.length; i += 2) {
         diBytes.add(int.parse(diHex.substring(i, i + 2), radix: 16));
       }
-      while (diBytes.length < 3) diBytes.add(0);
+      while (diBytes.length < 3) {
+        diBytes.add(0);
+      }
       return [
         (reqAddrBytes[0] & 0xC0) | (mfg & 0x3F),
         dt,
@@ -260,7 +268,9 @@ class HartCommServer {
     ];
 
     int cs = 0;
-    for (final b in payload) cs ^= b;
+    for (final b in payload) {
+      cs ^= b;
+    }
 
     final packet = Uint8List.fromList([
       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // preamble

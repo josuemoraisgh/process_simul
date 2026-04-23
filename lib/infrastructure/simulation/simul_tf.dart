@@ -77,7 +77,9 @@ class DiscreteSS {
 
   double step(double u) {
     final xNext = _mul(A, x);
-    for (int i = 0; i < x.length; i++) xNext[i] += B[i] * u;
+    for (int i = 0; i < x.length; i++) {
+      xNext[i] += B[i] * u;
+    }
     x = xNext;
     return _dot(C, x) + D * u;
   }
@@ -92,7 +94,9 @@ class DiscreteSS {
 
   static double _dot(List<double> a, List<double> b) {
     double s = 0;
-    for (int i = 0; i < a.length; i++) s += a[i] * b[i];
+    for (int i = 0; i < a.length; i++) {
+      s += a[i] * b[i];
+    }
     return s;
   }
 }
@@ -190,7 +194,9 @@ class SimulTf {
   }
 
   void reset() {
-    for (final e in _entries.values) e.sys.reset();
+    for (final e in _entries.values) {
+      e.sys.reset();
+    }
   }
 
   bool _loggedFirstTick = false;

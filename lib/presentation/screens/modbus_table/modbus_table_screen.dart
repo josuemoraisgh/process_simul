@@ -832,14 +832,17 @@ class HartTransmitter {
   static double _eval(String e) {
     e = e.trim();
     for (int i = e.length - 1; i > 0; i--) {
-      if (e[i] == '+')
+      if (e[i] == '+') {
         return _eval(e.substring(0, i)) + _eval(e.substring(i + 1));
-      if (e[i] == '-')
+      }
+      if (e[i] == '-') {
         return _eval(e.substring(0, i)) - _eval(e.substring(i + 1));
+      }
     }
     for (int i = e.length - 1; i > 0; i--) {
-      if (e[i] == '*')
+      if (e[i] == '*') {
         return _eval(e.substring(0, i)) * _eval(e.substring(i + 1));
+      }
       if (e[i] == '/') {
         final r = _eval(e.substring(i + 1));
         return r == 0 ? 0 : _eval(e.substring(0, i)) / r;

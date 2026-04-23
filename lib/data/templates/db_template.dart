@@ -3,6 +3,7 @@
 /// Each HART column entry: (byteSize, typeStr, [device0val, device1val, ...])
 /// Device order: FV100CA, FIT100CA, FV100AR, FIT100AR, TIT100, FIT100V,
 ///               PIT100V, LIT100, PIT100A, FV100A, FIT100A
+library;
 
 const List<String> kHartDevices = [
   'FV100CA', 'FIT100CA', 'FV100AR', 'FIT100AR', 'TIT100',

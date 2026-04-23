@@ -6,7 +6,6 @@ import '../../domain/enums/db_model.dart';
 import '../../domain/repositories/i_db_repository.dart';
 import '../../infrastructure/hart/hart_type_converter.dart';
 import '../../infrastructure/hart/hart_transmitter.dart';
-import '../../infrastructure/hart/hart_transmitter.dart';
 import '../../infrastructure/simulation/simul_tf.dart';
 import 'log_notifier.dart';
 

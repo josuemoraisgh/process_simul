@@ -1,6 +1,7 @@
 /// Default seed data for HART primitive and custom types.
 ///
 /// Mirrors the Python hrt_enum.py and hrt_bitenum.py files.
+library;
 
 /// Primitive HART types (catalog).
 const List<String> kPrimitiveTypes = [
