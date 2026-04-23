@@ -90,7 +90,7 @@ jobs:
         id: ver
         shell: bash
         run: |
-          CLEAN="${VERSION#v}"
+          CLEAN="${VERSION#[vV]}"
           BASE="${CLEAN%%-*}"
           PARTS=$(echo "$BASE" | awk -F. '{print NF}')
           if [ "$PARTS" -eq 3 ]; then
