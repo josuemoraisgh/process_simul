@@ -144,35 +144,48 @@ jobs:
         shell: pwsh
         run: |
           $buildDir = "${{ steps.find-build.outputs.build_dir }}"
-          # Procura o CRT x64 na instalação do Visual Studio disponível no runner
-          $vsBase = "C:\Program Files\Microsoft Visual Studio\2022"
-          $editions = @("Enterprise", "Professional", "Community", "BuildTools")
-          $crtDir = $null
-          foreach ($ed in $editions) {
-            $redist = Join-Path $vsBase "$ed\VC\Redist\MSVC"
-            if (Test-Path $redist) {
-              $latest = Get-ChildItem $redist -Directory | Sort-Object Name -Descending | Select-Object -First 1
-              if ($latest) {
-                $candidate = Join-Path $latest.FullName "x64\Microsoft.VC143.CRT"
-                if (Test-Path $candidate) { $crtDir = $candidate; break }
-                # fallback para VC142 (VS 2019)
-                $candidate = Join-Path $latest.FullName "x64\Microsoft.VC142.CRT"
-                if (Test-Path $candidate) { $crtDir = $candidate; break }
-              }
+
+          # Localiza o VS via vswhere (disponível em todos os runners do GitHub)
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "❌ vswhere.exe não encontrado em $vswhere"
+          }
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualCpp.Redist.14.Latest -property installationPath
+          if (-not $vsInstall) {
+            # fallback: pega qualquer instalação disponível
+            $vsInstall = & $vswhere -latest -products * -property installationPath
+          }
+          Write-Output "VS instalado em: $vsInstall"
+
+          # Localiza a pasta do CRT x64 mais recente
+          $redistBase = Join-Path $vsInstall "VC\Redist\MSVC"
+          $crtDir = Get-ChildItem $redistBase -Directory |
+                    Sort-Object Name -Descending |
+                    ForEach-Object {
+                      $c143 = Join-Path $_.FullName "x64\Microsoft.VC143.CRT"
+                      $c142 = Join-Path $_.FullName "x64\Microsoft.VC142.CRT"
+                      if (Test-Path $c143) { $c143; return }
+                      if (Test-Path $c142) { $c142; return }
+                    } | Select-Object -First 1
+
+          if (-not $crtDir) {
+            # Último recurso: copiar diretamente do System32 (já presentes no runner)
+            Write-Output "⚠️  Pasta CRT não encontrada via redistrib. Copiando de System32..."
+            $sys32 = "$env:SystemRoot\System32"
+            @("vcruntime140.dll","vcruntime140_1.dll","msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll","concrt140.dll") | ForEach-Object {
+              $src = Join-Path $sys32 $_
+              if (Test-Path $src) { Copy-Item $src $buildDir -Force; Write-Output "  copiado: $_" }
+            }
+          } else {
+            Write-Output "Copiando DLLs de: $crtDir"
+            @("vcruntime140.dll","vcruntime140_1.dll","msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll","concrt140.dll") | ForEach-Object {
+              $src = Join-Path $crtDir $_
+              if (Test-Path $src) { Copy-Item $src $buildDir -Force; Write-Output "  copiado: $_" }
             }
           }
-          if (-not $crtDir) {
-            throw "❌ Diretório do VC++ CRT x64 não encontrado."
-          }
-          Write-Output "Copiando DLLs de: $crtDir"
-          Copy-Item (Join-Path $crtDir "vcruntime140.dll")   $buildDir -Force
-          Copy-Item (Join-Path $crtDir "vcruntime140_1.dll") $buildDir -Force -ErrorAction SilentlyContinue
-          Copy-Item (Join-Path $crtDir "msvcp140.dll")       $buildDir -Force
-          Copy-Item (Join-Path $crtDir "msvcp140_1.dll")     $buildDir -Force -ErrorAction SilentlyContinue
-          Copy-Item (Join-Path $crtDir "msvcp140_2.dll")     $buildDir -Force -ErrorAction SilentlyContinue
-          Copy-Item (Join-Path $crtDir "concrt140.dll")      $buildDir -Force -ErrorAction SilentlyContinue
-          Write-Output "✅ DLLs do VC++ Runtime incluídas no build:"
+          Write-Output "✅ DLLs incluídas:"
           Get-ChildItem $buildDir -Filter "*140*.dll" | ForEach-Object { Write-Output "  $($_.Name)" }
+
 
       - name: Adicionar WiX Toolset ao PATH
         shell: pwsh
