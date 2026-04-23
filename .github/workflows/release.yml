@@ -140,6 +140,40 @@ jobs:
           echo "✅ Build encontrado em: $BUILD_DIR"
           echo "build_dir=$BUILD_DIR" >> $GITHUB_OUTPUT
 
+      - name: Incluir DLLs do Visual C++ Runtime no build
+        shell: pwsh
+        run: |
+          $buildDir = "${{ steps.find-build.outputs.build_dir }}"
+          # Procura o CRT x64 na instalação do Visual Studio disponível no runner
+          $vsBase = "C:\Program Files\Microsoft Visual Studio\2022"
+          $editions = @("Enterprise", "Professional", "Community", "BuildTools")
+          $crtDir = $null
+          foreach ($ed in $editions) {
+            $redist = Join-Path $vsBase "$ed\VC\Redist\MSVC"
+            if (Test-Path $redist) {
+              $latest = Get-ChildItem $redist -Directory | Sort-Object Name -Descending | Select-Object -First 1
+              if ($latest) {
+                $candidate = Join-Path $latest.FullName "x64\Microsoft.VC143.CRT"
+                if (Test-Path $candidate) { $crtDir = $candidate; break }
+                # fallback para VC142 (VS 2019)
+                $candidate = Join-Path $latest.FullName "x64\Microsoft.VC142.CRT"
+                if (Test-Path $candidate) { $crtDir = $candidate; break }
+              }
+            }
+          }
+          if (-not $crtDir) {
+            throw "❌ Diretório do VC++ CRT x64 não encontrado."
+          }
+          Write-Output "Copiando DLLs de: $crtDir"
+          Copy-Item (Join-Path $crtDir "vcruntime140.dll")   $buildDir -Force
+          Copy-Item (Join-Path $crtDir "vcruntime140_1.dll") $buildDir -Force -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $crtDir "msvcp140.dll")       $buildDir -Force
+          Copy-Item (Join-Path $crtDir "msvcp140_1.dll")     $buildDir -Force -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $crtDir "msvcp140_2.dll")     $buildDir -Force -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $crtDir "concrt140.dll")      $buildDir -Force -ErrorAction SilentlyContinue
+          Write-Output "✅ DLLs do VC++ Runtime incluídas no build:"
+          Get-ChildItem $buildDir -Filter "*140*.dll" | ForEach-Object { Write-Output "  $($_.Name)" }
+
       - name: Adicionar WiX Toolset ao PATH
         shell: pwsh
         run: |
@@ -239,7 +273,7 @@ jobs:
 
             ## 💻 Requisitos
             - Windows 10 / 11 (x64)
-            - Visual C++ Redistributable 2015-2022
+            - Sem dependências externas — runtime incluído no instalador
 
             ## ⚙️ Build Info
             - Flutter: ${{ env.FLUTTER_VERSION }}
