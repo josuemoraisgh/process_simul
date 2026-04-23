@@ -43,7 +43,7 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
     final ModbusTableState mbState = ref.watch(modbusTableProvider);
     // Read HART data reference (mutated in-place) and notifier for value ticks.
     final hartNotifier = ref.read(hartTableProvider.notifier);
-    final hartData = hartNotifier.state.data;
+    final hartData = ref.read(hartTableProvider).data;
     var rows = mbState.data.entries.toList();
 
     if (mbState.loading) {

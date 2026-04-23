@@ -1,3 +1,7 @@
+// ignore_for_file: non_constant_identifier_names
+// Mathematical state-space and transfer-function variable names (Ts, A, B, C,
+// D, Ac, Bc, Cc, Dc, Ad, Bd) follow conventional control-systems notation.
+
 import 'dart:async';
 import '../../domain/entities/react_var.dart';
 import '../hart/hart_type_converter.dart';

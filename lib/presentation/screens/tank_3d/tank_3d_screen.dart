@@ -95,7 +95,7 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
                       Text(
                         'Caldeira Aquatubular',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
+                          color: Colors.white.withValues(alpha: 0.7),
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                           letterSpacing: 0.8,

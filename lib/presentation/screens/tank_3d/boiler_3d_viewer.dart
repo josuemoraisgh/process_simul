@@ -1,3 +1,8 @@
+// ignore_for_file: implementation_imports, depend_on_referenced_packages
+// Imports from flutter_3d_controller/src/* are intentional to access the
+// internal ModelViewer for full rendering control. flutter_inappwebview is a
+// transitive dependency exposed by flutter_3d_controller.
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';

@@ -1,0 +1,188 @@
+name: Build & Release (Windows) - process_simul
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão/Tag (ex.: v1.0.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Marcar como pré-release?"
+        required: false
+        default: false
+        type: boolean
+      notes:
+        description: "Notas da release (opcional)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  VERSION: ${{ github.event.inputs.version }}
+  FLUTTER_VERSION: "3.41.5"
+  ZIP_NAME: process_simul-${{ github.event.inputs.version }}-windows.zip
+
+jobs:
+  build-windows:
+    name: Windows (Flutter + ZIP Release)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validar versão
+        shell: bash
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "❌ Versão não informada"
+            exit 1
+          fi
+          echo "✅ Versão/Tag: $VERSION"
+
+      - name: Verificar estrutura do projeto
+        shell: bash
+        run: |
+          echo "Verificando arquivos do projeto..."
+          if [ ! -f "pubspec.yaml" ]; then
+            echo "❌ pubspec.yaml não encontrado"
+            exit 1
+          fi
+          if [ ! -d "windows" ]; then
+            echo "❌ Pasta windows/ não encontrada"
+            exit 1
+          fi
+          if [ ! -d "lib" ]; then
+            echo "❌ Pasta lib/ não encontrada"
+            exit 1
+          fi
+          echo "✅ Estrutura do projeto OK"
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+          cache: true
+
+      - name: Verificar versões instaladas
+        shell: bash
+        run: |
+          echo "Flutter:"
+          flutter --version
+          echo ""
+          echo "Dart:"
+          dart --version
+
+      - name: Habilitar suporte a Windows
+        run: flutter config --enable-windows-desktop
+
+      - name: Instalar dependências
+        shell: bash
+        run: |
+          echo "Executando flutter pub get..."
+          flutter pub get
+          echo "✅ Dependências instaladas"
+
+      - name: Analisar código
+        shell: bash
+        run: |
+          echo "Analisando código..."
+          flutter analyze --no-fatal-infos || true
+          echo "✅ Análise concluída"
+
+      - name: Atualizar versão no pubspec.yaml
+        shell: bash
+        run: |
+          VERSION_CLEAN="${VERSION#v}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          echo "Atualizando versão para: $VERSION_CLEAN+$BUILD_NUMBER"
+          sed -i "s/^version: .*/version: ${VERSION_CLEAN}+${BUILD_NUMBER}/" pubspec.yaml
+          echo "✅ pubspec.yaml atualizado"
+          grep "^version:" pubspec.yaml
+
+      - name: Compilar Windows Release
+        shell: bash
+        run: |
+          echo "Compilando build Windows release..."
+          flutter build windows --release \
+            --build-name="${VERSION#v}" \
+            --build-number="${GITHUB_RUN_NUMBER}"
+          echo "✅ Compilação concluída"
+
+      - name: Localizar build gerado
+        id: find-build
+        shell: bash
+        run: |
+          echo "Procurando saída do build..."
+          BUILD_DIR="build/windows/x64/runner/Release"
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "❌ Diretório de build não encontrado: $BUILD_DIR"
+            find build -type d -name "Release" 2>/dev/null
+            exit 1
+          fi
+          echo "✅ Build encontrado em: $BUILD_DIR"
+          ls -lh "$BUILD_DIR"
+          echo "build_dir=$BUILD_DIR" >> $GITHUB_OUTPUT
+
+      - name: Empacotar release em ZIP
+        shell: pwsh
+        run: |
+          $buildDir = "${{ steps.find-build.outputs.build_dir }}"
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          $zipPath = "release/$env:ZIP_NAME"
+          Compress-Archive -Path "$buildDir/*" -DestinationPath $zipPath -Force
+          $size = (Get-Item $zipPath).Length / 1MB
+          Write-Host ("✅ ZIP criado: {0} ({1:N2} MB)" -f $zipPath, $size)
+
+      - name: Verificação final do pacote
+        shell: bash
+        run: |
+          echo "=== Verificação final ==="
+          ZIP_FILE="release/$ZIP_NAME"
+          if [ -f "$ZIP_FILE" ]; then
+            SIZE=$(du -sh "$ZIP_FILE" | cut -f1)
+            echo "✅ $ZIP_NAME ($SIZE)"
+          else
+            echo "❌ ZIP ausente: $ZIP_FILE"
+            exit 1
+          fi
+
+      - name: Upload artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: process_simul-${{ env.VERSION }}-windows
+          path: release/${{ env.ZIP_NAME }}
+          if-no-files-found: error
+
+      - name: Criar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: process_simul ${{ env.VERSION }} (Windows)
+          body: |
+            ${{ github.event.inputs.notes }}
+
+            ## 📦 Download
+            - **Windows ZIP**: `${{ env.ZIP_NAME }}`
+
+            ## 💻 Requisitos
+            - Windows 10 / 11 (x64)
+            - Visual C++ Redistributable 2015-2022
+
+            ## ⚙️ Build Info
+            - Flutter: ${{ env.FLUTTER_VERSION }}
+            - Build number: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+
+            ## 📝 Changelog
+            Veja as mudanças nesta versão nos commits abaixo.
+          prerelease: ${{ github.event.inputs.prerelease }}
+          files: release/${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
