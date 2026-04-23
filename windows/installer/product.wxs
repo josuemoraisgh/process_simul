@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   WiX 3.x installer for process_simul.
-  Installs to "C:\Program Files (x86)\process_simul" and creates a desktop
+  Installs to "C:\Program Files\process_simul" (x64) and creates a desktop
   shortcut plus a Start Menu shortcut.
 
   Required preprocessor variables (passed via candle.exe -d):
@@ -20,7 +20,7 @@
     <Package InstallerVersion="500"
              Compressed="yes"
              InstallScope="perMachine"
-             Platform="x86"
+             Platform="x64"
              Description="Process Simul - Industrial Process Simulator"
              Manufacturer="Josue Morais" />
 
@@ -29,8 +29,8 @@
 
     <!-- ── Diretórios ──────────────────────────────────────────────── -->
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <!-- Program Files (x86) -->
-      <Directory Id="ProgramFilesFolder">
+      <!-- Program Files (x64) -->
+      <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="process_simul" />
       </Directory>
 
@@ -45,7 +45,7 @@
 
     <!-- ── Atalho no Menu Iniciar ─────────────────────────────────── -->
     <DirectoryRef Id="ApplicationProgramsFolder">
-      <Component Id="ApplicationShortcut" Guid="A1B2C3D4-1111-2222-3333-444455556666">
+      <Component Id="ApplicationShortcut" Guid="A1B2C3D4-1111-2222-3333-444455556666" Win64="yes">
         <Shortcut Id="StartMenuShortcut"
                   Name="Process Simul"
                   Description="Industrial Process Simulator"
@@ -65,7 +65,7 @@
 
     <!-- ── Atalho na Área de Trabalho ─────────────────────────────── -->
     <DirectoryRef Id="DesktopFolder">
-      <Component Id="DesktopShortcut" Guid="B1B2C3D4-1111-2222-3333-444455556777">
+      <Component Id="DesktopShortcut" Guid="B1B2C3D4-1111-2222-3333-444455556777" Win64="yes">
         <Shortcut Id="DesktopShortcutItem"
                   Name="Process Simul"
                   Description="Industrial Process Simulator"

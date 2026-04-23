@@ -178,7 +178,7 @@ jobs:
           $buildDir = (Resolve-Path "${{ steps.find-build.outputs.build_dir }}").Path
           $appExe   = Join-Path $buildDir "process_simul.exe"
           $wixVer   = "${{ steps.ver.outputs.wix_version }}"
-          candle.exe -nologo -arch x86 `
+          candle.exe -nologo -arch x64 `
             "-dProductVersion=$wixVer" `
             "-dBuildDir=$buildDir" `
             "-dAppExe=$appExe" `
@@ -233,7 +233,7 @@ jobs:
             - **Windows Installer**: `${{ env.MSI_NAME }}`
 
             ## 🛠️ Instalação
-            - Instala em `C:\Program Files (x86)\process_simul`
+            - Instala em `C:\Program Files\process_simul`
             - Cria atalho na **Área de Trabalho**
             - Cria atalho no **Menu Iniciar** (pasta "Process Simul")
 
