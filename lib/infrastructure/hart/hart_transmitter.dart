@@ -4,15 +4,15 @@ import 'hart_type_converter.dart';
 
 /// Processes HART commands for a single device and returns the response body.
 ///
-/// Implements the core HART universal commands (0-21) following
-/// the original Python hrt_transmitter_v6.py DSL.
+/// Implements the core HART universal commands following
+/// the original Python hrt_transmitter_v2.py DSL.
 class HartTransmitter {
   HartTransmitter._();
 
   // ── Main entry point ─────────────────────────────────────────────────────────
 
   /// Process [command] with [requestBody] for [device] variable map.
-  /// Returns the response body bytes, or null if unsupported.
+  /// Returns the response body bytes, or error frame if unsupported.
   static List<int> process({
     required int command,
     required List<int> requestBody,
@@ -31,10 +31,18 @@ class HartTransmitter {
         return _cmd03(device);
       case '04':
         return _cmd04(device);
+      case '05':
+        return _cmd05(device);
       case '06':
         return _cmd06(device, requestBody, onWrite);
       case '07':
         return _cmd07(device);
+      case '08':
+        return _cmd08(device);
+      case '09':
+        return _cmd09(device);
+      case '0A':
+        return _cmd0A(device);
       case '0B':
         return _cmd0B(device, requestBody);
       case '0C':
@@ -52,9 +60,55 @@ class HartTransmitter {
       case '12':
         return _cmd12(device, requestBody, onWrite);
       case '13':
-        return _cmd13(device);
-      case '15':
-        return _cmd15(device, requestBody, onWrite);
+        return _cmd13(device, requestBody, onWrite);
+      case '21':
+        return _cmd21(device, requestBody);
+      case '26':
+        return _cmd26(device, onWrite);
+      case '28':
+        return _cmd28(device, requestBody);
+      case '29':
+        return _cmd29(device);
+      case '2A':
+        return _cmd2A(device);
+      case '2D':
+        return _cmd2D(device);
+      case '2E':
+        return _cmd2E(device);
+      case '50':
+        return _cmd50(device);
+      case '82':
+        return _hexResponse('00000201020101');
+      case '84':
+        return _hexResponse('000002012543D2000040A99999');
+      case '87':
+        return _hexResponse('00400201');
+      case '88':
+        return _hexResponse('700002FFFFFF');
+      case '8A':
+        return _hexResponse('000002FF');
+      case '8C':
+        return _hexResponse('7000023941AC33E939000000003942480000FFFF3900000000');
+      case '98':
+        return <int>[];
+      case 'A2':
+        return _hexResponse('00000201');
+      case 'A4':
+        return _hexResponse('0000020200');
+      case 'A6':
+        return _hexResponse('00000222040000130A270000010B00');
+      case 'A8':
+        return _hexResponse('00000201FF');
+      case 'AD':
+        return _hexResponse('0000025454333031313131302D425549314C335030543459');
+      case 'B9':
+        return _hexResponse('004002');
+      case 'BB':
+        return _hexResponse('000002FF');
+      case 'C6':
+        return _hexResponse('00000242480000');
+      case 'DF':
+        return _hexResponse('00000242C800003B801132B51B057FAC932D1D');
       default:
         return _errResponse(64); // Command not implemented
     }
@@ -85,7 +139,14 @@ class HartTransmitter {
 
   static List<int> _errResponse(int code) => [code, 0x00];
 
-  static List<int> _ok() => [0x00, 0x00];
+  static List<int> _hexResponse(String hex) => _hexToBytes(hex);
+
+  /// Returns device error_code bytes (used as HART response status).
+  static List<int> _ec(Map<String, ReactVar> dev) =>
+      _getHex(dev, 'error_code');
+
+  static String _bytesToHex(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
 
   // ── Identity block ────────────────────────────────────────────────────────
   static List<int> _identityBlock(Map<String, ReactVar> dev) => [
@@ -104,190 +165,230 @@ class HartTransmitter {
   // ── Commands ──────────────────────────────────────────────────────────────
 
   /// Command 00: Read unique identifier.
-  static List<int> _cmd00(Map<String, ReactVar> dev) {
-    return _buildResponse(_getHex(dev, 'error_code'), [_identityBlock(dev)]);
-  }
+  static List<int> _cmd00(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [_identityBlock(dev)]);
 
   /// Command 01: Read primary variable.
-  static List<int> _cmd01(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'PROCESS_VARIABLE'),
-    ]);
-  }
+  static List<int> _cmd01(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'PROCESS_VARIABLE'),
+      ]);
 
   /// Command 02: Read loop current and percent of range.
-  static List<int> _cmd02(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'loop_current'),
-      _getHex(dev, 'percent_of_range'),
-    ]);
-  }
+  static List<int> _cmd02(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'loop_current'),
+        _getHex(dev, 'percent_of_range'),
+      ]);
 
   /// Command 03: Read dynamic variables and loop current.
-  static List<int> _cmd03(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'loop_current'),
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'PROCESS_VARIABLE'),
-      // SV, TV, QV (repeat PV for simplicity)
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'PROCESS_VARIABLE'),
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'PROCESS_VARIABLE'),
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'PROCESS_VARIABLE'),
-    ]);
-  }
+  static List<int> _cmd03(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'loop_current'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'PROCESS_VARIABLE'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'PROCESS_VARIABLE'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'PROCESS_VARIABLE'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'PROCESS_VARIABLE'),
+      ]);
 
-  /// Command 04: Read current and percent of range (similar to 02).
-  static List<int> _cmd04(Map<String, ReactVar> dev) => _cmd02(dev);
+  /// Command 04: stub — returns only status bytes.
+  static List<int> _cmd04(Map<String, ReactVar> dev) => _ec(dev);
 
-  /// Command 06: Write polling address.
+  /// Command 05: stub — returns only status bytes.
+  static List<int> _cmd05(Map<String, ReactVar> dev) => _ec(dev);
+
+  /// Command 06: Write polling address + loop current mode, echo both back.
   static List<int> _cmd06(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
-    if (body.isNotEmpty) {
-      final hex = body[0].toRadixString(16).padLeft(2, '0').toUpperCase();
-      onWrite('polling_address', hex);
+    if (body.length >= 2) {
+      onWrite('polling_address',
+          body[0].toRadixString(16).padLeft(2, '0').toUpperCase());
+      onWrite('loop_current_mode',
+          body[1].toRadixString(16).padLeft(2, '0').toUpperCase());
     }
-    return _buildResponse(_ok(), [_getHex(dev, 'polling_address')]);
-  }
-
-  /// Command 07: Read loop configuration.
-  static List<int> _cmd07(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
+    return _buildResponse(_ec(dev), [
       _getHex(dev, 'polling_address'),
       _getHex(dev, 'loop_current_mode'),
     ]);
   }
 
+  /// Command 07: Read loop configuration.
+  static List<int> _cmd07(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'polling_address'),
+        _getHex(dev, 'loop_current_mode'),
+      ]);
+
+  /// Command 08: Read dynamic variable classifications — returns 4 zero-bytes.
+  static List<int> _cmd08(Map<String, ReactVar> dev) =>
+      [..._ec(dev), 0x00, 0x00, 0x00, 0x00];
+
+  /// Command 09: stub.
+  static List<int> _cmd09(Map<String, ReactVar> dev) => _ec(dev);
+
+  /// Command 0A: stub.
+  static List<int> _cmd0A(Map<String, ReactVar> dev) => _ec(dev);
+
   /// Command 0B (11): Read unique identifier associated with tag.
   static List<int> _cmd0B(Map<String, ReactVar> dev, List<int> body) {
-    // Compare body (tag bytes) with stored tag
     final tagHex = dev['tag']?.evaluatedHex ?? dev['tag']?.rawValue ?? '';
-    final bodyHex = body
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join()
-        .toUpperCase();
+    final bodyHex = _bytesToHex(body);
     final match = tagHex.toUpperCase() == bodyHex;
     return [match ? 0x00 : 0x01, ..._identityBlock(dev)];
   }
 
   /// Command 0C (12): Read message.
-  static List<int> _cmd0C(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [_getHex(dev, 'message')]);
-  }
+  static List<int> _cmd0C(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [_getHex(dev, 'message')]);
 
   /// Command 0D (13): Read tag, descriptor, date.
-  static List<int> _cmd0D(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'tag'),
-      _getHex(dev, 'descriptor'),
-      _getHex(dev, 'date'),
-    ]);
-  }
+  static List<int> _cmd0D(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'tag'),
+        _getHex(dev, 'descriptor'),
+        _getHex(dev, 'date'),
+      ]);
 
-  /// Command 0E (14): Read primary variable sensor info.
-  static List<int> _cmd0E(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'sensor1_serial_number'),
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'pressure_upper_range_limit'),
-      _getHex(dev, 'pressure_lower_range_limit'),
-      _getHex(dev, 'pressure_minimum_span'),
-    ]);
-  }
+  /// Command 0E (14): Read primary variable transducer information.
+  static List<int> _cmd0E(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'sensor1_serial_number'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'pressure_upper_range_limit'),
+        _getHex(dev, 'pressure_lower_range_limit'),
+        _getHex(dev, 'pressure_minimum_span'),
+      ]);
 
-  /// Command 0F (15): Read output info.
-  static List<int> _cmd0F(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [
-      _getHex(dev, 'alarm_selection_code'),
-      _getHex(dev, 'transfer_function_code'),
-      _getHex(dev, 'process_variable_unit_code'),
-      _getHex(dev, 'upper_range_value'),
-      _getHex(dev, 'lower_range_value'),
-      _getHex(dev, 'pressure_damping_value'),
-      _getHex(dev, 'write_protect_code'),
-      _getHex(dev, 'manufacturer_id'),
-      _getHex(dev, 'analog_output_numbers_code'),
-    ]);
-  }
+  /// Command 0F (15): Read device/PV output information.
+  static List<int> _cmd0F(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [
+        _getHex(dev, 'alarm_selection_code'),
+        _getHex(dev, 'transfer_function_code'),
+        _getHex(dev, 'process_variable_unit_code'),
+        _getHex(dev, 'upper_range_value'),
+        _getHex(dev, 'lower_range_value'),
+        _getHex(dev, 'pressure_damping_value'),
+        _getHex(dev, 'write_protect_code'),
+        _getHex(dev, 'manufacturer_id'),
+        _getHex(dev, 'analog_output_numbers_code'),
+      ]);
 
   /// Command 10 (16): Read final assembly number.
-  static List<int> _cmd10(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [_getHex(dev, 'final_assembly_number')]);
-  }
+  static List<int> _cmd10(Map<String, ReactVar> dev) =>
+      _buildResponse(_ec(dev), [_getHex(dev, 'final_assembly_number')]);
 
-  /// Command 11 (17): Write message.
+  /// Command 11 (17): Write message — save and echo back.
   static List<int> _cmd11(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
-    if (body.isNotEmpty) {
-      final hex = body
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      onWrite('message', hex);
-    }
-    return _buildResponse(_ok(), []);
+    onWrite('message', _bytesToHex(body));
+    return [..._ec(dev), ...body];
   }
 
-  /// Command 12 (18): Write tag, descriptor, date.
+  /// Command 12 (18): Write tag, descriptor, date — save and echo back.
+  /// Body layout: tag=6B, descriptor=12B, date=3B (total 21B).
   static List<int> _cmd12(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
     if (body.length >= 21) {
-      final tag = body
-          .sublist(0, 6)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      final desc = body
-          .sublist(6, 18)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      final date = body
-          .sublist(18, 21)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      onWrite('tag', tag);
-      onWrite('descriptor', desc);
-      onWrite('date', date);
+      final tagBytes = body.sublist(0, 6);
+      final descBytes = body.sublist(6, 18);
+      final dateBytes = body.sublist(18, 21);
+      onWrite('tag', _bytesToHex(tagBytes));
+      onWrite('descriptor', _bytesToHex(descBytes));
+      onWrite('date', _bytesToHex(dateBytes));
+      return [..._ec(dev), ...tagBytes, ...descBytes, ...dateBytes];
     }
-    return _buildResponse(_ok(), []);
+    return _ec(dev);
   }
 
-  /// Command 13 (19): Write final assembly number.
-  static List<int> _cmd13(Map<String, ReactVar> dev) {
-    return _buildResponse(_ok(), [_getHex(dev, 'final_assembly_number')]);
-  }
-
-  /// Command 15 (21): Read all device variables.
-  static List<int> _cmd15(Map<String, ReactVar> dev, List<int> body,
+  /// Command 13 (19): Write final assembly number — save and echo back.
+  static List<int> _cmd13(Map<String, ReactVar> dev, List<int> body,
       Function(String, String) onWrite) {
-    // Write range values if body provides them
-    if (body.length >= 17) {
-      onWrite('alarm_selection_code',
-          body[0].toRadixString(16).padLeft(2, '0').toUpperCase());
-      onWrite('transfer_function_code',
-          body[1].toRadixString(16).padLeft(2, '0').toUpperCase());
-      onWrite('process_variable_unit_code',
-          body[2].toRadixString(16).padLeft(2, '0').toUpperCase());
-      final upperHex = body
-          .sublist(3, 7)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      final lowerHex = body
-          .sublist(7, 11)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join()
-          .toUpperCase();
-      onWrite('upper_range_value', upperHex);
-      onWrite('lower_range_value', lowerHex);
+    if (body.length >= 3) {
+      final fanBytes = body.sublist(0, 3);
+      onWrite('final_assembly_number', _bytesToHex(fanBytes));
+      return [..._ec(dev), ...fanBytes];
     }
-    return _cmd0F(dev);
+    return _buildResponse(_ec(dev), [_getHex(dev, 'final_assembly_number')]);
   }
+
+  /// Command 21 (0x21=33): Read device variables.
+  /// Body: single code byte, or [count, code0, code1, ...].
+  static List<int> _cmd21(Map<String, ReactVar> dev, List<int> body) {
+    final List<int> codes;
+    if (body.length == 1) {
+      codes = [body[0]];
+    } else if (body.length >= 2) {
+      final n = body[0].clamp(0, body.length - 1);
+      codes = body.sublist(1, 1 + n);
+    } else {
+      codes = [];
+    }
+
+    final result = <int>[..._ec(dev)];
+    for (final code in codes) {
+      if (code == 0x00) {
+        result
+          ..addAll(_getHex(dev, 'process_variable_unit_code'))
+          ..addAll(_getHex(dev, 'PROCESS_VARIABLE'));
+      } else {
+        // Unit "not used" (0xFA) + NaN as IEEE 754 float
+        result.addAll([0xFA, 0x7F, 0xC0, 0x00, 0x00]);
+      }
+    }
+    return result;
+  }
+
+  /// Command 26 (0x26): Reset error flags.
+  static List<int> _cmd26(
+      Map<String, ReactVar> dev, Function(String, String) onWrite) {
+    onWrite('config_changed', '00');
+    return [
+      0x02,
+      ..._ec(dev),
+      ..._getHex(dev, 'response_code'),
+      ..._getHex(dev, 'device_status'),
+      ..._getHex(dev, 'comm_status'),
+    ];
+  }
+
+  /// Command 28 (0x28): Enter/exit fixed current mode — echo requested value.
+  static List<int> _cmd28(Map<String, ReactVar> dev, List<int> body) =>
+      [..._ec(dev), ...body];
+
+  /// Command 29 (0x29): Perform self test.
+  static List<int> _cmd29(Map<String, ReactVar> dev) => [
+        ..._getHex(dev, 'response_code'),
+        ..._getHex(dev, 'device_status'),
+      ];
+
+  /// Command 2A (0x2A): Perform device reset.
+  static List<int> _cmd2A(Map<String, ReactVar> dev) => _ec(dev);
+
+  /// Command 2D (0x2D): Trim 4 mA.
+  static List<int> _cmd2D(Map<String, ReactVar> dev) => [
+        ..._getHex(dev, 'response_code'),
+        ..._getHex(dev, 'device_status'),
+      ];
+
+  /// Command 2E (0x2E): Trim 20 mA.
+  static List<int> _cmd2E(Map<String, ReactVar> dev) => [
+        ..._getHex(dev, 'response_code'),
+        ..._getHex(dev, 'device_status'),
+      ];
+
+  /// Command 50 (0x50): Read dynamic variable assignments.
+  static List<int> _cmd50(Map<String, ReactVar> dev) => [
+        ..._ec(dev),
+        ...(dev['pv_code'] != null ? _getHex(dev, 'pv_code') : [0xFA]),
+        ...(dev['sv_code'] != null ? _getHex(dev, 'sv_code') : [0xFA]),
+        ...(dev['tv_code'] != null ? _getHex(dev, 'tv_code') : [0xFA]),
+        ...(dev['qv_code'] != null ? _getHex(dev, 'qv_code') : [0xFA]),
+      ];
 
   // ── Expression evaluator helpers ─────────────────────────────────────────────
 
