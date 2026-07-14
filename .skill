@@ -1,0 +1,61 @@
+# Protocolo Operacional — Auditoria e Refatoracao
+
+Este arquivo descreve como agentes devem executar a especificacao em `.spec`.
+Ele nao assume um runtime ou schema externo de skills.
+
+## Regras obrigatorias
+
+1. Ler `.spec`, o relatorio da frente e os testes relevantes antes de editar.
+2. Preservar mudancas existentes do usuario e nao apagar artefatos ambiguos.
+3. Registrar cada problema com arquivo/linha, gravidade, impacto e correcao.
+4. Antes de corrigir comportamento, criar ou identificar teste que o congele.
+5. Manter patches por fronteira de responsabilidade; nao fazer limpeza ampla
+   dentro de um patch funcional.
+6. Em conflito, desempenho vence, desde que os contratos funcionais e de
+   seguranca continuem aprovados.
+7. Nao assumir regras externas de HART, Modbus, XLSX, serial ou 3D; registrar a
+   duvida e preservar compatibilidade por adaptador quando seguro.
+8. Encerrar e testar todo recurso possuido: timers, listeners, subscriptions,
+   sockets, serial, statements, DB, controllers e handlers JavaScript.
+9. Nenhum novo equipamento ou comando HART pode depender de edicao em widget,
+   SQL concreto ou `switch` central: usar catalogos, portas e registries.
+10. Todo handler HART usa o parser/codec e o registro de funcoes comuns; nao
+    criar parsing ad hoc dentro de comandos.
+
+## Rotina de cada frente
+
+1. Confirmar baseline e arquivos de escopo.
+2. Publicar achados priorizados e contratos de entrada/saida.
+3. Adicionar caracterizacao ou regressao minima.
+4. Implementar em incrementos pequenos e revisaveis.
+5. Rodar testes focados e analyzer.
+6. Medir desempenho quando tocar hot path.
+7. Entregar relatorio, riscos residuais e lista exata de arquivos alterados.
+
+## Gates de integracao
+
+- Gate A: caracterizacao dos caminhos tocados aprovada.
+- Gate B: contrato arquitetural e validacoes de fronteira definidos.
+- Gate C: patch focado aprovado por testes e analyzer.
+- Gate D: regressao por achado alto/critico presente.
+- Gate E: suite total, cobertura, benchmarks e smoke final aprovados.
+- Gate F: teste de extensibilidade prova registro/remocao de equipamento,
+  comando HART e funcao de parser sem infraestrutura externa.
+
+## Formato de achado
+
+`ID | arquivo:linha | gravidade | impacto | evidencia/PoC | correcao | teste`
+
+## Formato de entrega
+
+- Resumo do resultado.
+- Problemas corrigidos e riscos residuais.
+- Medidas antes/depois quando aplicavel.
+- Testes executados e resultado.
+- Mudancas de API e migracao necessaria.
+
+## Ultima execucao
+
+Em 2026-07-14, todos os gates funcionais foram aprovados: analyzer limpo,
+96/96 testes e 85,27% de cobertura de linhas. Consulte `AUDIT_HANDOFF.md` e
+`docs/audit/README.md` para numeros por camada, decisoes e riscos residuais.

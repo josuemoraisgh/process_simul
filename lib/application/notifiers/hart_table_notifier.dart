@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/react_var.dart';
+import '../../domain/equipment/equipment.dart';
 import '../../domain/enums/db_model.dart';
 import '../../domain/repositories/i_db_repository.dart';
 import '../../infrastructure/hart/hart_type_converter.dart';
 import '../../infrastructure/hart/hart_transmitter.dart';
 import '../../infrastructure/simulation/simul_tf.dart';
 import 'log_notifier.dart';
+import '../equipment/equipment_catalog.dart';
 
 /// Immutable view-model for the HART table.
 class HartTableState {
@@ -88,10 +90,12 @@ class HartTableState {
 /// Manages the HART table state, expression evaluation, and TF simulation.
 class HartTableNotifier extends StateNotifier<HartTableState> {
   final IDbRepository _repo;
+  final EquipmentCatalog _equipmentCatalog;
   final SimulTf _simul;
   Timer? _evalTimer;
   bool _dirty = false;
   int _dataVersion = 0;
+  final List<ReactVar> _funcVars = [];
 
   /// Per-cell notifiers: only the cells whose display changed get rebuilt.
   final Map<String, ValueNotifier<String>> _cellNotifiers = {};
@@ -99,7 +103,8 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
   /// Incremented whenever cell values change (for external listeners like Modbus).
   final ValueNotifier<int> dataVersionNotifier = ValueNotifier<int>(0);
 
-  HartTableNotifier(this._repo, this._simul) : super(const HartTableState());
+  HartTableNotifier(this._repo, this._simul, this._equipmentCatalog)
+      : super(const HartTableState());
 
   /// Returns (or creates) a ValueNotifier for a single cell's display text.
   /// Widgets should wrap their display in [ValueListenableBuilder] with this.
@@ -165,6 +170,7 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
         bitEnumMaps: bitEnumMaps,
       );
 
+      _rebuildFuncIndex();
       _evaluateAll();
       _startEvalTimer();
       _registerTFuncs();
@@ -181,6 +187,7 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
       v.setRawValue(rawValue);
       v.setEvaluatedHex('');
     }
+    _rebuildFuncIndex();
     _evaluateAll();
     _refreshCellNotifiers();
     _dataVersion++;
@@ -205,14 +212,18 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
   /// Re-evaluates all @func cells. Returns `true` when any value changed.
   bool _evaluateAll() {
     bool anyChanged = false;
-    for (final device in state.data.values) {
-      for (final v in device.values) {
-        if (v.model == DbModel.func) {
-          if (_evalFunc(v)) anyChanged = true;
-        }
-      }
+    for (final v in _funcVars) {
+      if (_evalFunc(v)) anyChanged = true;
     }
     return anyChanged;
+  }
+
+  void _rebuildFuncIndex() {
+    _funcVars
+      ..clear()
+      ..addAll(state.data.values.expand(
+        (device) => device.values.where((v) => v.model == DbModel.func),
+      ));
   }
 
   /// Returns `true` when the evaluated hex actually changed.
@@ -302,12 +313,15 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────────
   Future<void> addDevice(String deviceName) async {
-    await _repo.addHartDevice(deviceName);
+    await _equipmentCatalog.register(EquipmentDefinition(
+      id: EquipmentId(deviceName),
+      protocols: const {EquipmentProtocol.hart},
+    ));
     await load();
   }
 
   Future<void> removeDevice(String deviceName) async {
-    await _repo.removeHartDevice(deviceName);
+    await _equipmentCatalog.remove(EquipmentId(deviceName));
     await load();
   }
 
@@ -353,12 +367,16 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
       'lower_range_value',
       'process_variable_unit_code',
     ];
-    final preferredLower = preferred.map((p) => p.toLowerCase()).toSet();
+    final preferredOrder = <String, int>{};
+    for (final col in preferred) {
+      preferredOrder.putIfAbsent(
+          col.toLowerCase(), () => preferredOrder.length);
+    }
     final result = <String>[];
     final rest = <String>[];
 
     for (final col in all) {
-      if (preferredLower.contains(col.toLowerCase())) {
+      if (preferredOrder.containsKey(col.toLowerCase())) {
         result.add(col);
       } else {
         rest.add(col);
@@ -367,8 +385,8 @@ class HartTableNotifier extends StateNotifier<HartTableState> {
 
     // Sort result in preferred order (case-insensitive)
     result.sort((a, b) {
-      final ai = preferredLower.toList().indexOf(a.toLowerCase());
-      final bi = preferredLower.toList().indexOf(b.toLowerCase());
+      final ai = preferredOrder[a.toLowerCase()]!;
+      final bi = preferredOrder[b.toLowerCase()]!;
       return ai.compareTo(bi);
     });
 

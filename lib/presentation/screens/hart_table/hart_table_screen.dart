@@ -395,6 +395,10 @@ class _HartTableState extends ConsumerState<_HartTable> {
     final devices = widget.sortedDevices;
     final numCols = s.visibleCols.length;
     final bodyW = numCols * _colW;
+    final columnMeta = {
+      for (final device in s.data.values)
+        for (final entry in device.entries) entry.key: entry.value,
+    };
 
     return Column(children: [
       // ── Column headers (sticky top) ───────────────────────────────────
@@ -438,11 +442,7 @@ class _HartTableState extends ConsumerState<_HartTable> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: s.visibleCols.map((c) {
-                  final meta = s.data.values
-                      .expand((m) => m.entries)
-                      .where((e) => e.key == c)
-                      .map((e) => e.value)
-                      .firstOrNull;
+                  final meta = columnMeta[c];
                   return _ColHeader(
                     label: c,
                     width: _colW,

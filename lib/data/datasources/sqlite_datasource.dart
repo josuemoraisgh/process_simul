@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../templates/db_template.dart';
 import '../templates/hart_types_template.dart';
 import '../templates/hart_commands_template.dart';
+import 'xls_import_validator.dart';
 
 /// Low-level SQLite operations using the sqlite3 package (native FFI).
 ///
@@ -18,14 +19,24 @@ import '../templates/hart_commands_template.dart';
 ///   hart_enum     (enum_index INT, hex_key TEXT, description TEXT, PK(enum_index,hex_key))
 ///   hart_bitenum  (bitenum_index INT, hex_mask INT, description TEXT, PK(bitenum_index,hex_mask))
 ///   hart_commands (command TEXT PK, description TEXT, req_json TEXT, resp_json TEXT, write_json TEXT)
+///   equipment_catalog (id TEXT PK, protocols_json TEXT, profile_json TEXT,
+///                      attributes_json TEXT)
 class SqliteDatasource {
   late Database _db;
+  bool _isOpen = false;
 
   // ── Open / init ────────────────────────────────────────────────────────────
   Future<void> open() async {
     final dir = await getApplicationDocumentsDirectory();
     final dbPath = p.join(dir.path, 'process_simul.db');
+    openAt(dbPath);
+  }
+
+  /// Opens an explicit database path. Intended for controlled environments
+  /// such as tests, migrations and disposable tools.
+  void openAt(String dbPath) {
     _db = sqlite3.open(dbPath);
+    _isOpen = true;
     _db.execute('PRAGMA journal_mode=WAL');
     _db.execute('PRAGMA foreign_keys=ON');
     _onCreate();
@@ -83,6 +94,14 @@ class SqliteDatasource {
         req_json    TEXT NOT NULL DEFAULT '[]',
         resp_json   TEXT NOT NULL DEFAULT '[]',
         write_json  TEXT NOT NULL DEFAULT '[]'
+      )
+    ''');
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS equipment_catalog (
+        id              TEXT PRIMARY KEY,
+        protocols_json  TEXT NOT NULL,
+        profile_json    TEXT,
+        attributes_json TEXT NOT NULL
       )
     ''');
 
@@ -290,6 +309,79 @@ class SqliteDatasource {
     _db.execute('DELETE FROM hart_data WHERE device=?', [deviceName]);
   }
 
+  // Equipment catalog -----------------------------------------------------
+
+  List<Map<String, Object?>> getEquipmentDefinitions() => _db
+      .select('SELECT * FROM equipment_catalog ORDER BY id')
+      .map((row) => Map<String, Object?>.from(row))
+      .toList(growable: false);
+
+  Map<String, Object?>? getEquipmentDefinition(String id) {
+    final rows = _db.select(
+      'SELECT * FROM equipment_catalog WHERE id = ?',
+      [id],
+    );
+    return rows.isEmpty ? null : Map<String, Object?>.from(rows.first);
+  }
+
+  /// Atomically stores generic metadata and provisions the legacy HART rows
+  /// when the definition enables HART. Modbus stays metadata-only because the
+  /// current point schema has no equipment identity or unit-id.
+  void addEquipmentDefinition({
+    required String id,
+    required String protocolsJson,
+    required String? profileJson,
+    required String attributesJson,
+    required bool provisionHart,
+  }) {
+    _db.execute('BEGIN IMMEDIATE');
+    try {
+      final duplicate = _db.select(
+        'SELECT 1 FROM equipment_catalog WHERE id = ? LIMIT 1',
+        [id],
+      );
+      if (duplicate.isNotEmpty || getHartDevices().contains(id)) {
+        throw StateError('equipment already exists: $id');
+      }
+      _db.execute(
+        'INSERT INTO equipment_catalog '
+        '(id, protocols_json, profile_json, attributes_json) '
+        'VALUES (?, ?, ?, ?)',
+        [id, protocolsJson, profileJson, attributesJson],
+      );
+      if (provisionHart) {
+        final stmt = _db.prepare(
+          'INSERT INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
+        );
+        try {
+          for (final entry in kHartTemplate.entries) {
+            stmt.execute([id, entry.key, entry.value.$3.first]);
+          }
+        } finally {
+          stmt.dispose();
+        }
+      }
+      _db.execute('COMMIT');
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  void removeEquipmentDefinition(String id, {required bool removeHart}) {
+    _db.execute('BEGIN IMMEDIATE');
+    try {
+      _db.execute('DELETE FROM equipment_catalog WHERE id = ?', [id]);
+      if (removeHart) {
+        _db.execute('DELETE FROM hart_data WHERE device = ?', [id]);
+      }
+      _db.execute('COMMIT');
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
   void addHartColumn(String colName, int byteSize, String typeStr,
       String defaultHex, List<String> devices) {
     _db.execute('BEGIN');
@@ -330,10 +422,21 @@ class SqliteDatasource {
   }
 
   void renameHartDevice(String oldName, String newName) {
-    _db.execute(
-      'UPDATE hart_data SET device=? WHERE device=?',
-      [newName, oldName],
-    );
+    _db.execute('BEGIN IMMEDIATE');
+    try {
+      _db.execute(
+        'UPDATE equipment_catalog SET id=? WHERE id=?',
+        [newName, oldName],
+      );
+      _db.execute(
+        'UPDATE hart_data SET device=? WHERE device=?',
+        [newName, oldName],
+      );
+      _db.execute('COMMIT');
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
+    }
   }
 
   void editHartColumn(String oldColName, String newColName, int byteSize,
@@ -575,211 +678,249 @@ class SqliteDatasource {
   /// Imports HART and Modbus data from an XLSX file.
   /// Returns the number of rows imported.
   int importFromXls(String sourcePath) {
-    final bytes = File(sourcePath).readAsBytesSync();
+    final source = File(sourcePath);
+    XlsImportValidator.validateFileSize(source.lengthSync());
+    final bytes = source.readAsBytesSync();
     final excel = Excel.decodeBytes(bytes);
+    XlsImportValidator.validate(excel);
     int count = 0;
 
-    // ── HART sheet ──────────────────────────────────────────────────────
-    final hartSheet = excel.tables['HART'] ?? excel.tables['HART_tabela'];
-    if (hartSheet != null && hartSheet.rows.length > 1) {
-      final headers =
-          hartSheet.rows.first.map((c) => c?.value?.toString() ?? '').toList();
+    _db.execute('BEGIN IMMEDIATE');
+    try {
+      // ── HART sheet ──────────────────────────────────────────────────────
+      final hartSheet = excel.tables['HART'] ?? excel.tables['HART_tabela'];
+      if (hartSheet != null && hartSheet.rows.length > 1) {
+        final headers = hartSheet.rows.first
+            .map((c) => c?.value?.toString() ?? '')
+            .toList();
 
-      // Detect meta columns
-      final nameIdx = headers.indexWhere((h) => h.toUpperCase() == 'NAME');
-      final sizeIdx = headers.indexWhere((h) => h.toUpperCase() == 'BYTE_SIZE');
-      final typeIdx = headers.indexWhere((h) => h.toUpperCase() == 'TYPE');
+        // Detect meta columns
+        final nameIdx = headers.indexWhere((h) => h.toUpperCase() == 'NAME');
+        final sizeIdx =
+            headers.indexWhere((h) => h.toUpperCase() == 'BYTE_SIZE');
+        final typeIdx = headers.indexWhere((h) => h.toUpperCase() == 'TYPE');
 
-      if (nameIdx >= 0 && sizeIdx >= 0 && typeIdx >= 0) {
-        // Device columns are everything that's not NAME/BYTE_SIZE/TYPE
-        final metaCols = {nameIdx, sizeIdx, typeIdx};
-        final deviceCols = <int, String>{};
-        for (int i = 0; i < headers.length; i++) {
-          if (!metaCols.contains(i) && headers[i].isNotEmpty) {
-            deviceCols[i] = headers[i];
-          }
-        }
-
-        _db.execute('BEGIN');
-        try {
-          _db.execute('DELETE FROM hart_meta');
-          _db.execute('DELETE FROM hart_data');
-
-          final metaStmt = _db.prepare(
-            'INSERT OR REPLACE INTO hart_meta (col_name, byte_size, type_str) VALUES (?, ?, ?)',
-          );
-          final dataStmt = _db.prepare(
-            'INSERT OR REPLACE INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
-          );
-
-          for (int row = 1; row < hartSheet.rows.length; row++) {
-            final cells = hartSheet.rows[row];
-            final colName = cells.length > nameIdx
-                ? (cells[nameIdx]?.value?.toString() ?? '')
-                : '';
-            if (colName.isEmpty) continue;
-            final byteSize = cells.length > sizeIdx
-                ? (int.tryParse(cells[sizeIdx]?.value?.toString() ?? '') ?? 1)
-                : 1;
-            final typeStr = cells.length > typeIdx
-                ? (cells[typeIdx]?.value?.toString() ?? 'UNSIGNED')
-                : 'UNSIGNED';
-
-            metaStmt.execute([colName, byteSize, typeStr]);
-
-            for (final dEntry in deviceCols.entries) {
-              final rawVal = cells.length > dEntry.key
-                  ? (cells[dEntry.key]?.value?.toString() ?? '00')
-                  : '00';
-              dataStmt.execute([dEntry.value, colName, rawVal]);
-              count++;
+        if (nameIdx >= 0 && sizeIdx >= 0 && typeIdx >= 0) {
+          // Device columns are everything that's not NAME/BYTE_SIZE/TYPE
+          final metaCols = {nameIdx, sizeIdx, typeIdx};
+          final deviceCols = <int, String>{};
+          for (int i = 0; i < headers.length; i++) {
+            if (!metaCols.contains(i) && headers[i].isNotEmpty) {
+              deviceCols[i] = headers[i];
             }
           }
 
-          metaStmt.dispose();
-          dataStmt.dispose();
-          _db.execute('COMMIT');
-        } catch (e) {
-          _db.execute('ROLLBACK');
-          rethrow;
-        }
-      }
-    }
+          _db.execute('SAVEPOINT import_hart');
+          try {
+            _db.execute('DELETE FROM hart_meta');
+            _db.execute('DELETE FROM hart_data');
 
-    // ── Modbus sheet ────────────────────────────────────────────────────
-    final mbSheet = excel.tables['MODBUS'] ?? excel.tables['MODBUS_tabela'];
-    if (mbSheet != null && mbSheet.rows.length > 1) {
-      final headers = mbSheet.rows.first
-          .map((c) => c?.value?.toString().toUpperCase() ?? '')
-          .toList();
+            final metaStmt = _db.prepare(
+              'INSERT OR REPLACE INTO hart_meta (col_name, byte_size, type_str) VALUES (?, ?, ?)',
+            );
+            try {
+              final dataStmt = _db.prepare(
+                'INSERT OR REPLACE INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
+              );
+              try {
+                for (int row = 1; row < hartSheet.rows.length; row++) {
+                  final cells = hartSheet.rows[row];
+                  final colName = cells.length > nameIdx
+                      ? (cells[nameIdx]?.value?.toString() ?? '')
+                      : '';
+                  if (colName.isEmpty) continue;
+                  final byteSize = cells.length > sizeIdx
+                      ? (int.tryParse(
+                              cells[sizeIdx]?.value?.toString() ?? '') ??
+                          1)
+                      : 1;
+                  final typeStr = cells.length > typeIdx
+                      ? (cells[typeIdx]?.value?.toString() ?? 'UNSIGNED')
+                      : 'UNSIGNED';
 
-      int col(String name) => headers.indexOf(name);
-      final ni = col('NAME');
-      final si = col('BYTE_SIZE');
-      final ti = col('TYPE');
-      final pi = col('MB_POINT');
-      final ai = col('ADDRESS');
+                  metaStmt.execute([colName, byteSize, typeStr]);
 
-      // The formula column could be 'CLP100' or 'FORMULA'
-      var fi = col('FORMULA');
-      if (fi < 0) fi = col('CLP100');
-
-      if (ni >= 0) {
-        _db.execute('BEGIN');
-        try {
-          _db.execute('DELETE FROM modbus_data');
-          final stmt = _db.prepare(
-            'INSERT OR REPLACE INTO modbus_data (name, byte_size, type_str, mb_point, address, formula, raw_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          );
-          for (int row = 1; row < mbSheet.rows.length; row++) {
-            final cells = mbSheet.rows[row];
-            String cell(int i) => (i >= 0 && cells.length > i)
-                ? (cells[i]?.value?.toString() ?? '')
-                : '';
-            final name = cell(ni);
-            if (name.isEmpty) continue;
-            final byteSize = int.tryParse(cell(si)) ?? 4;
-            final typeStr = cell(ti).isEmpty ? 'UNSIGNED' : cell(ti);
-            final mbPoint = cell(pi).isEmpty ? 'ir' : cell(pi).toLowerCase();
-            final address = cell(ai).isEmpty ? '01' : cell(ai);
-            final formula = cell(fi).isEmpty ? '00000000' : cell(fi);
-            stmt.execute(
-                [name, byteSize, typeStr, mbPoint, address, formula, formula]);
-            count++;
+                  for (final dEntry in deviceCols.entries) {
+                    final rawVal = cells.length > dEntry.key
+                        ? (cells[dEntry.key]?.value?.toString() ?? '00')
+                        : '00';
+                    dataStmt.execute([dEntry.value, colName, rawVal]);
+                    count++;
+                  }
+                }
+              } finally {
+                dataStmt.dispose();
+              }
+            } finally {
+              metaStmt.dispose();
+            }
+            _db.execute('RELEASE import_hart');
+          } catch (e) {
+            _db.execute('ROLLBACK TO import_hart');
+            rethrow;
           }
-          stmt.dispose();
-          _db.execute('COMMIT');
+        }
+      }
+
+      // ── Modbus sheet ────────────────────────────────────────────────────
+      final mbSheet = excel.tables['MODBUS'] ?? excel.tables['MODBUS_tabela'];
+      if (mbSheet != null && mbSheet.rows.length > 1) {
+        final headers = mbSheet.rows.first
+            .map((c) => c?.value?.toString().toUpperCase() ?? '')
+            .toList();
+
+        int col(String name) => headers.indexOf(name);
+        final ni = col('NAME');
+        final si = col('BYTE_SIZE');
+        final ti = col('TYPE');
+        final pi = col('MB_POINT');
+        final ai = col('ADDRESS');
+
+        // The formula column could be 'CLP100' or 'FORMULA'
+        var fi = col('FORMULA');
+        if (fi < 0) fi = col('CLP100');
+
+        if (ni >= 0) {
+          _db.execute('SAVEPOINT import_modbus');
+          try {
+            _db.execute('DELETE FROM modbus_data');
+            final stmt = _db.prepare(
+              'INSERT OR REPLACE INTO modbus_data (name, byte_size, type_str, mb_point, address, formula, raw_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            );
+            try {
+              for (int row = 1; row < mbSheet.rows.length; row++) {
+                final cells = mbSheet.rows[row];
+                String cell(int i) => (i >= 0 && cells.length > i)
+                    ? (cells[i]?.value?.toString() ?? '')
+                    : '';
+                final name = cell(ni);
+                if (name.isEmpty) continue;
+                final byteSize = int.tryParse(cell(si)) ?? 4;
+                final typeStr = cell(ti).isEmpty ? 'UNSIGNED' : cell(ti);
+                final mbPoint =
+                    cell(pi).isEmpty ? 'ir' : cell(pi).toLowerCase();
+                final address = cell(ai).isEmpty ? '01' : cell(ai);
+                final formula = cell(fi).isEmpty ? '00000000' : cell(fi);
+                stmt.execute([
+                  name,
+                  byteSize,
+                  typeStr,
+                  mbPoint,
+                  address,
+                  formula,
+                  formula
+                ]);
+                count++;
+              }
+            } finally {
+              stmt.dispose();
+            }
+            _db.execute('RELEASE import_modbus');
+          } catch (e) {
+            _db.execute('ROLLBACK TO import_modbus');
+            rethrow;
+          }
+        }
+      }
+
+      // ── ENUM sheet (optional) ───────────────────────────────────────────
+      final enumSheet = excel.tables['ENUM'];
+      if (enumSheet != null && enumSheet.rows.length > 1) {
+        _db.execute('SAVEPOINT import_enum');
+        try {
+          _db.execute('DELETE FROM hart_enum');
+          final stmt = _db.prepare(
+            'INSERT OR REPLACE INTO hart_enum (enum_index, hex_key, description) VALUES (?, ?, ?)',
+          );
+          try {
+            for (int row = 1; row < enumSheet.rows.length; row++) {
+              final cells = enumSheet.rows[row];
+              if (cells.length < 3) continue;
+              final idx = int.tryParse(cells[0]?.value?.toString() ?? '');
+              if (idx == null) continue;
+              stmt.execute([
+                idx,
+                cells[1]?.value?.toString() ?? '',
+                cells[2]?.value?.toString() ?? ''
+              ]);
+            }
+          } finally {
+            stmt.dispose();
+          }
+          _db.execute('RELEASE import_enum');
         } catch (e) {
-          _db.execute('ROLLBACK');
+          _db.execute('ROLLBACK TO import_enum');
           rethrow;
         }
       }
-    }
 
-    // ── ENUM sheet (optional) ───────────────────────────────────────────
-    final enumSheet = excel.tables['ENUM'];
-    if (enumSheet != null && enumSheet.rows.length > 1) {
-      _db.execute('BEGIN');
-      try {
-        _db.execute('DELETE FROM hart_enum');
-        final stmt = _db.prepare(
-          'INSERT OR REPLACE INTO hart_enum (enum_index, hex_key, description) VALUES (?, ?, ?)',
-        );
-        for (int row = 1; row < enumSheet.rows.length; row++) {
-          final cells = enumSheet.rows[row];
-          if (cells.length < 3) continue;
-          final idx = int.tryParse(cells[0]?.value?.toString() ?? '');
-          if (idx == null) continue;
-          stmt.execute([
-            idx,
-            cells[1]?.value?.toString() ?? '',
-            cells[2]?.value?.toString() ?? ''
-          ]);
+      // ── BIT_ENUM sheet (optional) ───────────────────────────────────────
+      final bitSheet = excel.tables['BIT_ENUM'];
+      if (bitSheet != null && bitSheet.rows.length > 1) {
+        _db.execute('SAVEPOINT import_bitenum');
+        try {
+          _db.execute('DELETE FROM hart_bitenum');
+          final stmt = _db.prepare(
+            'INSERT OR REPLACE INTO hart_bitenum (bitenum_index, hex_mask, description) VALUES (?, ?, ?)',
+          );
+          try {
+            for (int row = 1; row < bitSheet.rows.length; row++) {
+              final cells = bitSheet.rows[row];
+              if (cells.length < 3) continue;
+              final idx = int.tryParse(cells[0]?.value?.toString() ?? '');
+              final mask = int.tryParse(cells[1]?.value?.toString() ?? '');
+              if (idx == null || mask == null) continue;
+              stmt.execute([idx, mask, cells[2]?.value?.toString() ?? '']);
+            }
+          } finally {
+            stmt.dispose();
+          }
+          _db.execute('RELEASE import_bitenum');
+        } catch (e) {
+          _db.execute('ROLLBACK TO import_bitenum');
+          rethrow;
         }
-        stmt.dispose();
-        _db.execute('COMMIT');
-      } catch (e) {
-        _db.execute('ROLLBACK');
-        rethrow;
       }
-    }
 
-    // ── BIT_ENUM sheet (optional) ───────────────────────────────────────
-    final bitSheet = excel.tables['BIT_ENUM'];
-    if (bitSheet != null && bitSheet.rows.length > 1) {
-      _db.execute('BEGIN');
-      try {
-        _db.execute('DELETE FROM hart_bitenum');
-        final stmt = _db.prepare(
-          'INSERT OR REPLACE INTO hart_bitenum (bitenum_index, hex_mask, description) VALUES (?, ?, ?)',
-        );
-        for (int row = 1; row < bitSheet.rows.length; row++) {
-          final cells = bitSheet.rows[row];
-          if (cells.length < 3) continue;
-          final idx = int.tryParse(cells[0]?.value?.toString() ?? '');
-          final mask = int.tryParse(cells[1]?.value?.toString() ?? '');
-          if (idx == null || mask == null) continue;
-          stmt.execute([idx, mask, cells[2]?.value?.toString() ?? '']);
+      // ── COMMANDS sheet (optional) ───────────────────────────────────────
+      final cmdSheet = excel.tables['COMMANDS'];
+      if (cmdSheet != null && cmdSheet.rows.length > 1) {
+        _db.execute('SAVEPOINT import_commands');
+        try {
+          _db.execute('DELETE FROM hart_commands');
+          final stmt = _db.prepare(
+            'INSERT OR REPLACE INTO hart_commands (command, description, req_json, resp_json, write_json) VALUES (?, ?, ?, ?, ?)',
+          );
+          try {
+            for (int row = 1; row < cmdSheet.rows.length; row++) {
+              final cells = cmdSheet.rows[row];
+              if (cells.length < 5) continue;
+              final cmd = cells[0]?.value?.toString() ?? '';
+              if (cmd.isEmpty) continue;
+              stmt.execute([
+                cmd,
+                cells[1]?.value?.toString() ?? '',
+                cells[2]?.value?.toString() ?? '[]',
+                cells[3]?.value?.toString() ?? '[]',
+                cells[4]?.value?.toString() ?? '[]',
+              ]);
+            }
+          } finally {
+            stmt.dispose();
+          }
+          _db.execute('RELEASE import_commands');
+        } catch (e) {
+          _db.execute('ROLLBACK TO import_commands');
+          rethrow;
         }
-        stmt.dispose();
-        _db.execute('COMMIT');
-      } catch (e) {
-        _db.execute('ROLLBACK');
-        rethrow;
       }
-    }
 
-    // ── COMMANDS sheet (optional) ───────────────────────────────────────
-    final cmdSheet = excel.tables['COMMANDS'];
-    if (cmdSheet != null && cmdSheet.rows.length > 1) {
-      _db.execute('BEGIN');
-      try {
-        _db.execute('DELETE FROM hart_commands');
-        final stmt = _db.prepare(
-          'INSERT OR REPLACE INTO hart_commands (command, description, req_json, resp_json, write_json) VALUES (?, ?, ?, ?, ?)',
-        );
-        for (int row = 1; row < cmdSheet.rows.length; row++) {
-          final cells = cmdSheet.rows[row];
-          if (cells.length < 5) continue;
-          final cmd = cells[0]?.value?.toString() ?? '';
-          if (cmd.isEmpty) continue;
-          stmt.execute([
-            cmd,
-            cells[1]?.value?.toString() ?? '',
-            cells[2]?.value?.toString() ?? '[]',
-            cells[3]?.value?.toString() ?? '[]',
-            cells[4]?.value?.toString() ?? '[]',
-          ]);
-        }
-        stmt.dispose();
-        _db.execute('COMMIT');
-      } catch (e) {
-        _db.execute('ROLLBACK');
-        rethrow;
-      }
+      _db.execute('COMMIT');
+      return count;
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
     }
-
-    return count;
   }
 
   // ── XLS Export ────────────────────────────────────────────────────────────
@@ -791,6 +932,11 @@ class SqliteDatasource {
     final hartSheet = excel['HART'];
     final meta = getHartMeta();
     final devices = getHartDevices();
+    final hartValues = <(String, String), String>{
+      for (final row in getHartData())
+        (row['device'] as String, row['col'] as String):
+            row['raw_value'] as String,
+    };
 
     // Header row
     hartSheet.appendRow([
@@ -811,7 +957,7 @@ class SqliteDatasource {
         TextCellValue(typeStr),
       ];
       for (final dev in devices) {
-        final val = getHartCell(dev, colName) ?? '00';
+        final val = hartValues[(dev, colName)] ?? '00';
         row.add(TextCellValue(val));
       }
       hartSheet.appendRow(row);
@@ -906,5 +1052,9 @@ class SqliteDatasource {
     }
   }
 
-  void close() => _db.dispose();
+  void close() {
+    if (!_isOpen) return;
+    _db.dispose();
+    _isOpen = false;
+  }
 }

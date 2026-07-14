@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../application/providers/app_providers.dart';
+import '../../../application/notifiers/settings_notifier.dart';
 import '../../../domain/enums/db_model.dart';
 import '../../dialogs/custom_type_dialogs.dart';
 
@@ -223,7 +224,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(height: 12),
                 if (settings.hartMode == CommMode.tcp) ...[
                   _LabelRow(
-                    label: 'TCP host (client target)',
+                    label: 'Server bind address (HART + Modbus)',
                     child: _SmallField(ctrl: _tcpHostCtrl, hint: '127.0.0.1'),
                   ),
                   const SizedBox(height: 8),
@@ -421,18 +422,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _save() {
+  Future<void> _save() async {
+    final hartPort = int.tryParse(_hartSrvPortCtrl.text.trim());
+    final modbusPort = int.tryParse(_modbusPortCtrl.text.trim());
+    final tfStep = int.tryParse(_tfStepMsCtrl.text.trim());
+    if (hartPort == null || !AppSettings.isValidPort(hartPort)) {
+      _showValidationError('HART TCP port must be between 1 and 65535');
+      return;
+    }
+    if (modbusPort == null || !AppSettings.isValidPort(modbusPort)) {
+      _showValidationError('Modbus port must be between 1 and 65535');
+      return;
+    }
+    if (tfStep == null || !AppSettings.isValidTfStep(tfStep)) {
+      _showValidationError('TF step must be between 10 and 5000 ms');
+      return;
+    }
     final s = ref.read(settingsProvider);
-    ref.read(settingsProvider.notifier).save(s.copyWith(
+    await ref.read(settingsProvider.notifier).save(s.copyWith(
           hartSerialPort: _selectedPort,
           hartTcpHost: _tcpHostCtrl.text.trim(),
-          hartServerPort: int.tryParse(_hartSrvPortCtrl.text) ?? 5094,
-          modbusPort: int.tryParse(_modbusPortCtrl.text) ?? 502,
-          tfStepMs: (int.tryParse(_tfStepMsCtrl.text) ?? 50).clamp(10, 5000),
+          hartServerPort: hartPort,
+          modbusPort: modbusPort,
+          tfStepMs: tfStep,
         ));
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
           content: Text('Settings saved'), duration: Duration(seconds: 2)),
+    );
+  }
+
+  void _showValidationError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import '../../domain/entities/react_var.dart';
 import '../../application/notifiers/log_notifier.dart';
+import 'hart_frame.dart';
 import 'hart_transmitter.dart';
 
 typedef HartTableGetter = Map<String, Map<String, ReactVar>> Function();
@@ -17,18 +18,20 @@ class HartSerialServer {
   final String portName;
   final HartTableGetter getTable;
   final HartCellWriter writeCell;
+  final HartTransmitter transmitter;
 
   SerialPort? _port;
   SerialPortReader? _reader;
   StreamSubscription<Uint8List>? _sub;
   bool _running = false;
-  final _buf = <int>[];
+  final HartFrameDecoder _decoder = HartFrameDecoder();
 
   HartSerialServer({
     required this.portName,
     required this.getTable,
     required this.writeCell,
-  });
+    HartTransmitter? transmitter,
+  }) : transmitter = transmitter ?? HartTransmitter.standard();
 
   bool get isRunning => _running;
 
@@ -69,8 +72,15 @@ class HartSerialServer {
     _sub = _reader!.stream.listen(
       (data) {
         if (!_running) return;
-        _buf.addAll(data);
-        _flush();
+        final frames = _decoder.add(data);
+        for (final frame in frames) {
+          if (frame.isMasterToSlave) _handleFrame(frame);
+        }
+        if (_decoder.overflowed) {
+          globalLog.warning(
+              'HART-Serial', 'Receive buffer limit exceeded; clearing buffer');
+          _decoder.clear();
+        }
       },
       onError: (e) {
         if (!_running) return;
@@ -85,7 +95,7 @@ class HartSerialServer {
   Future<void> stop() async {
     if (!_running) return;
     _running = false;
-    _buf.clear();
+    _decoder.clear();
 
     // 1. Cancel the stream subscription first (stops data callbacks).
     final sub = _sub;
@@ -122,86 +132,14 @@ class HartSerialServer {
     globalLog.info('HART-Serial', 'Stopped on $portName');
   }
 
-  // ── Frame extraction (identical logic to HartCommServer._flush) ──────────
-  void _flush() {
-    // Consume until preamble
-    while (_buf.isNotEmpty && _buf.first != 0xFF) {
-      _buf.removeAt(0);
-    }
-    if (_buf.length < 6) return;
-
-    // Find end of preamble
-    int pos = 0;
-    while (pos < _buf.length && _buf[pos] == 0xFF) {
-      pos++;
-    }
-    if (pos >= _buf.length) return;
-
-    final delim = _buf[pos];
-    final isLong = (delim & 0x80) != 0;
-    final addrLen = isLong ? 5 : 1;
-    final headerEnd = pos + 1 + addrLen + 2;
-    if (_buf.length <= headerEnd) return;
-    final byteCount = _buf[headerEnd - 1];
-    final totalNeeded = headerEnd + byteCount + 1; // +1 checksum
-    if (_buf.length < totalNeeded) return;
-
-    final frame = List<int>.from(_buf.sublist(0, totalNeeded));
-    _buf.removeRange(0, totalNeeded);
-
-    _handleFrame(frame);
-
-    // Process further frames in buffer
-    if (_buf.isNotEmpty) _flush();
-  }
-
   // ── Frame processing (identical logic to HartCommServer._handleFrame) ────
-  void _handleFrame(List<int> raw) {
-    int pos = 0;
-    while (pos < raw.length && raw[pos] == 0xFF) {
-      pos++;
-    }
-    if (pos >= raw.length) return;
-
-    final delim = raw[pos];
-
+  void _handleFrame(HartFrame frame) {
+    final isLong = frame.isLongAddress;
+    final addrBytes = isLong ? frame.longAddress : [frame.address];
+    final pollAddr = isLong ? 0 : frame.address & 0x3F;
+    final command = frame.command;
+    final body = frame.body;
     // Ignore our own echoed response frames (delimiter 0x06 or 0x86)
-    final frameType = delim & 0x07;
-    if (frameType == 0x06 || frameType == 0x01) {
-      // 0x06 = slave response (short), 0x86 = slave response (long)
-      // 0x01 = burst frame — also ignore
-      return;
-    }
-
-    // Log received frame
-    final rxHex = raw
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join()
-        .toUpperCase();
-    globalLog.debug('HART-Serial', 'Rx: $rxHex');
-
-    pos++; // advance past delimiter
-    final isLong = (delim & 0x80) != 0;
-    int pollAddr = 0;
-    List<int> addrBytes =
-        []; // full address bytes (preserves master/burst bits)
-
-    if (isLong) {
-      if (pos + 5 > raw.length) return;
-      addrBytes = List.from(raw.sublist(pos, pos + 5));
-      pos += 5;
-    } else {
-      if (pos >= raw.length) return;
-      addrBytes = [raw[pos++]];
-      pollAddr = addrBytes[0] & 0x3F;
-    }
-
-    if (pos + 2 > raw.length) return;
-    final command = raw[pos++];
-    final byteCount = raw[pos++];
-    if (pos + byteCount > raw.length) return;
-    final body = raw.sublist(pos, pos + byteCount);
-
     // Route to correct device
     final table = getTable();
     Map<String, ReactVar> device = {};
@@ -240,22 +178,13 @@ class HartSerialServer {
       }
     }
 
-    if (device.isEmpty && table.isNotEmpty) {
-      // Fallback for address 0 / no match: use device with highest polling address
-      int maxAddr = -1;
-      for (final e in table.entries) {
-        final pa = int.tryParse(e.value['polling_address']?.rawValue ?? '00',
-                radix: 16) ??
-            0;
-        if (pa > maxAddr) {
-          maxAddr = pa;
-          device = e.value;
-          deviceName = e.key;
-        }
-      }
+    if (device.isEmpty) {
+      globalLog.warning(
+          'HART-Serial', 'Frame for unknown device address dropped');
+      return;
     }
 
-    final responseBody = HartTransmitter.process(
+    final responseBody = transmitter.dispatch(
       command: command,
       requestBody: body,
       device: device,

@@ -1,16 +1,155 @@
-import 'dart:math' as math;
 import '../../domain/entities/react_var.dart';
+import '../../domain/expression/expression_engine.dart';
+import '../../domain/hart/hart_command_registry.dart';
+import '../../domain/hart/hart_payload_parser.dart';
 import 'hart_type_converter.dart';
 
 /// Processes HART commands for a single device and returns the response body.
 ///
 /// Mirrors the Python hrt_transmitter_v6.py COMMANDS dict.
 class HartTransmitter {
-  HartTransmitter._();
+  HartTransmitter({
+    required HartCommandRegistry commands,
+    required HartFunctionRegistry functions,
+    this.codec = const HartPayloadCodec(),
+  })  : _commands = commands,
+        _functions = functions;
+
+  factory HartTransmitter.standard() {
+    return HartTransmitter(
+      commands: standardCommandRegistry(),
+      functions: HartFunctionRegistry(),
+    );
+  }
+
+  static HartCommandRegistry standardCommandRegistry() {
+    final commands = HartCommandRegistry();
+    for (final command in _standardCommandCodes) {
+      commands.register(FunctionalHartCommandHandler(
+        command,
+        (context) => _processLegacy(
+          command: command,
+          requestBody: context.requestBody,
+          device: context.device,
+          onWrite: context.onWrite,
+        ),
+      ));
+    }
+    return commands;
+  }
+
+  final HartCommandRegistry _commands;
+  final HartFunctionRegistry _functions;
+  final HartPayloadCodec codec;
+
+  void registerCommand(HartCommandHandler handler) =>
+      _commands.register(handler);
+
+  HartCommandHandler removeCommand(int command) => _commands.remove(command);
+
+  void registerFunction(HartFunction function) => _functions.register(function);
+
+  HartFunction removeFunction(String name) => _functions.remove(name);
+
+  static const _standardCommandCodes = <int>{
+    0x00,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x0A,
+    0x0B,
+    0x0C,
+    0x0D,
+    0x0E,
+    0x0F,
+    0x10,
+    0x11,
+    0x12,
+    0x13,
+    0x21,
+    0x26,
+    0x28,
+    0x29,
+    0x2A,
+    0x2B,
+    0x2D,
+    0x2E,
+    0x48,
+    0x50,
+    0x80,
+    0x82,
+    0x84,
+    0x85,
+    0x87,
+    0x88,
+    0x8A,
+    0x8C,
+    0x8E,
+    0x98,
+    0x9C,
+    0xA0,
+    0xA2,
+    0xA4,
+    0xA6,
+    0xA8,
+    0xAD,
+    0xB0,
+    0xB1,
+    0xB2,
+    0xB3,
+    0xB4,
+    0xB9,
+    0xBA,
+    0xBB,
+    0xBD,
+    0xC6,
+    0xCC,
+    0xDF,
+  };
+
+  static final ExpressionEngine _expressionEngine = ExpressionEngine();
+  static final HartTransmitter _compatibility = HartTransmitter.standard();
 
   // ── Main entry point ─────────────────────────────────────────────────────────
 
   static List<int> process({
+    required int command,
+    required List<int> requestBody,
+    required Map<String, ReactVar> device,
+    required Function(String col, String rawHex) onWrite,
+  }) =>
+      _compatibility.dispatch(
+        command: command,
+        requestBody: requestBody,
+        device: device,
+        onWrite: onWrite,
+      );
+
+  List<int> dispatch({
+    required int command,
+    required List<int> requestBody,
+    required Map<String, ReactVar> device,
+    required HartWrite onWrite,
+  }) {
+    return _commands.dispatch(
+      command,
+      HartCommandContext(
+        requestBody: requestBody,
+        device: device,
+        onWrite: onWrite,
+        functions: _functions,
+        codec: codec,
+      ),
+    );
+  }
+
+  static List<int> _processLegacy({
     required int command,
     required List<int> requestBody,
     required Map<String, ReactVar> device,
@@ -62,7 +201,8 @@ class HartTransmitter {
       case '0F':
         return _cmd0F(device);
       case '10':
-        return _buildResponse(_ec(device), [_g(device, 'final_assembly_number')]);
+        return _buildResponse(
+            _ec(device), [_g(device, 'final_assembly_number')]);
       case '11':
         return _cmd11(device, requestBody, onWrite);
       case '12':
@@ -116,10 +256,14 @@ class HartTransmitter {
         return [
           ..._hexBytes('70'),
           ..._g(device, 'device_status'),
-          ..._hexBytes('39'), ..._hexBytes('00000000'),
-          ..._hexBytes('39'), ..._hexBytes('00000000'),
-          ..._hexBytes('39'), ..._hexBytes('000000000001FF'),
-          ..._hexBytes('39'), ..._hexBytes('FFFFFFFF'),
+          ..._hexBytes('39'),
+          ..._hexBytes('00000000'),
+          ..._hexBytes('39'),
+          ..._hexBytes('00000000'),
+          ..._hexBytes('39'),
+          ..._hexBytes('000000000001FF'),
+          ..._hexBytes('39'),
+          ..._hexBytes('FFFFFFFF'),
         ];
       case '8E':
         return [
@@ -234,8 +378,10 @@ class HartTransmitter {
 
   static List<int> _ec(Map<String, ReactVar> dev) => _g(dev, 'error_code');
 
-  static String _bytesToHex(List<int> bytes) =>
-      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
+  static String _bytesToHex(List<int> bytes) => bytes
+      .map((b) => b.toRadixString(16).padLeft(2, '0'))
+      .join()
+      .toUpperCase();
 
   // ── Identity block ────────────────────────────────────────────────────────
   static List<int> _identityBlock(Map<String, ReactVar> dev) => [
@@ -448,140 +594,18 @@ class HartTransmitter {
   static double evaluateExpr(
       String expr, Map<String, Map<String, ReactVar>> allDevices) {
     try {
-      String resolved = expr;
-      resolved = resolved.replaceAllMapped(
-        RegExp(r'HART\.(\w+)\.(\w+)'),
-        (m) {
-          final device = m.group(1)!;
-          final col = m.group(2)!;
-          final v = allDevices[device]?[col];
-          if (v == null) return '0';
-          final hex = v.evaluatedHex.isEmpty ? v.rawValue : v.evaluatedHex;
-          if (v.typeStr.toUpperCase().contains('FLOAT') ||
-              v.typeStr == 'SREAL') {
-            return HartTypeConverter.hexToDouble(hex).toString();
-          }
-          try {
-            return int.parse(hex, radix: 16).toString();
-          } catch (_) {
-            return '0';
-          }
-        },
-      );
-      resolved = resolved.replaceAllMapped(
-        RegExp(r'int\(([^)]+)\)'),
-        (m) => _evalSimple(m.group(1)!).truncate().toString(),
-      );
-      return _evalSimple(resolved);
+      return _expressionEngine.evaluate(expr, (reference) {
+        if (reference.namespace != 'HART') return 0;
+        final v = allDevices[reference.owner]?[reference.field];
+        if (v == null) return 0;
+        final hex = v.evaluatedHex.isEmpty ? v.rawValue : v.evaluatedHex;
+        if (v.typeStr.toUpperCase().contains('FLOAT') || v.typeStr == 'SREAL') {
+          return HartTypeConverter.hexToDouble(hex);
+        }
+        return int.tryParse(hex, radix: 16)?.toDouble() ?? 0;
+      });
     } catch (_) {
       return 0.0;
     }
-  }
-
-  static double _evalSimple(String expr) {
-    expr = expr.trim();
-    if (expr.isEmpty) return 0.0;
-
-    if (expr.startsWith('(') && expr.endsWith(')')) {
-      int d = 0;
-      bool balanced = true;
-      for (int i = 0; i < expr.length - 1; i++) {
-        if (expr[i] == '(') d++;
-        if (expr[i] == ')') d--;
-        if (d == 0) {
-          balanced = false;
-          break;
-        }
-      }
-      if (balanced) return _evalSimple(expr.substring(1, expr.length - 1));
-    }
-
-    int depth = 0;
-    for (int i = expr.length - 1; i >= 1; i--) {
-      if (expr[i] == ')') depth++;
-      if (expr[i] == '(') depth--;
-      if (depth == 0 && (expr[i] == '+' || expr[i] == '-')) {
-        if (i > 1 && (expr[i - 1] == 'e' || expr[i - 1] == 'E')) continue;
-        final left = _evalSimple(expr.substring(0, i));
-        final right = _evalSimple(expr.substring(i + 1));
-        return expr[i] == '+' ? left + right : left - right;
-      }
-    }
-
-    depth = 0;
-    for (int i = expr.length - 1; i >= 1; i--) {
-      if (expr[i] == ')') depth++;
-      if (expr[i] == '(') depth--;
-      if (depth == 0) {
-        if (expr[i] == '/') {
-          final left = _evalSimple(expr.substring(0, i));
-          final right = _evalSimple(expr.substring(i + 1));
-          return right != 0 ? left / right : 0.0;
-        }
-        if (expr[i] == '*' &&
-            (i + 1 >= expr.length || expr[i + 1] != '*') &&
-            (expr[i - 1] != '*')) {
-          final left = _evalSimple(expr.substring(0, i));
-          final right = _evalSimple(expr.substring(i + 1));
-          return left * right;
-        }
-      }
-    }
-
-    depth = 0;
-    for (int i = 0; i < expr.length - 1; i++) {
-      if (expr[i] == '(') depth++;
-      if (expr[i] == ')') depth--;
-      if (depth == 0 && expr[i] == '*' && expr[i + 1] == '*') {
-        final left = _evalSimple(expr.substring(0, i));
-        final right = _evalSimple(expr.substring(i + 2));
-        return math.pow(left, right).toDouble();
-      }
-    }
-
-    if (expr.startsWith('-')) return -_evalSimple(expr.substring(1));
-    if (expr.startsWith('+')) return _evalSimple(expr.substring(1));
-
-    final fnRe = RegExp(r'^(math\.sqrt|sqrt|exp|abs|log|ln|pow)\(');
-    final fnMatch = fnRe.firstMatch(expr);
-    if (fnMatch != null) {
-      final fn = fnMatch.group(1)!;
-      final start = fn.length + 1;
-      int d = 1, end = start;
-      while (end < expr.length && d > 0) {
-        if (expr[end] == '(') d++;
-        if (expr[end] == ')') d--;
-        end++;
-      }
-      final argStr = expr.substring(start, end - 1);
-      if (fn == 'pow') {
-        final commaIdx = _findTopLevelComma(argStr);
-        if (commaIdx > 0) {
-          final a = _evalSimple(argStr.substring(0, commaIdx));
-          final b = _evalSimple(argStr.substring(commaIdx + 1));
-          return math.pow(a, b).toDouble();
-        }
-      }
-      final arg = _evalSimple(argStr);
-      return switch (fn) {
-        'exp' => math.exp(arg),
-        'sqrt' || 'math.sqrt' => math.sqrt(arg.clamp(0, double.infinity)),
-        'abs' => arg.abs(),
-        'log' || 'ln' => arg > 0 ? math.log(arg) : 0.0,
-        _ => arg,
-      };
-    }
-
-    return double.tryParse(expr) ?? 0.0;
-  }
-
-  static int _findTopLevelComma(String s) {
-    int d = 0;
-    for (int i = 0; i < s.length; i++) {
-      if (s[i] == '(') d++;
-      if (s[i] == ')') d--;
-      if (d == 0 && s[i] == ',') return i;
-    }
-    return -1;
   }
 }

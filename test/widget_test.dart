@@ -1,13 +1,27 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:process_simul/domain/entities/react_var.dart';
+import 'package:process_simul/domain/enums/db_model.dart';
 
 void main() {
-  // Placeholder — integration tests live in integration_test/.
-  test('placeholder', () => expect(true, isTrue));
+  test('ReactVar classifies persisted literal, expression and TF values', () {
+    final cell = ReactVar(
+      tableName: 'HART',
+      rowName: 'DEV',
+      colName: 'PV',
+      byteSize: 4,
+      typeStr: 'FLOAT',
+      rawValue: '3F800000',
+    );
+
+    expect(cell.model, DbModel.value);
+    expect(cell.evaluatedHex, '3F800000');
+
+    cell.setRawValue('@HART.DEV.INPUT * 2');
+    expect(cell.model, DbModel.func);
+    expect(cell.funcBody, 'HART.DEV.INPUT * 2');
+
+    cell.setRawValue(r'$[1],[1,1],0,@HART.DEV.INPUT');
+    expect(cell.model, DbModel.tFunc);
+    expect(cell.tFuncBody, '[1],[1,1],0,@HART.DEV.INPUT');
+  });
 }

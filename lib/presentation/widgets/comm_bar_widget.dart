@@ -77,7 +77,8 @@ class CommBarWidget extends ConsumerWidget {
             label: conn.hartServerRunning ? 'Stop' : 'Start',
             active: conn.hartServerRunning,
             onTap: () => _toggleHart(ref, conn.hartServerRunning,
-                settings.hartServerPort, settings.hartMode),
+                settings.hartServerPort, settings.hartMode,
+                bindHost: settings.hartTcpHost),
           ),
 
           const _VSep(),
@@ -98,8 +99,9 @@ class CommBarWidget extends ConsumerWidget {
           _SmallButton(
             label: conn.modbusRunning ? 'Stop' : 'Start',
             active: conn.modbusRunning,
-            onTap: () =>
-                _toggleModbus(ref, conn.modbusRunning, settings.modbusPort),
+            onTap: () => _toggleModbus(
+                ref, conn.modbusRunning, settings.modbusPort,
+                bindHost: settings.hartTcpHost),
           ),
 
           const _VSep(),
@@ -153,8 +155,8 @@ class CommBarWidget extends ConsumerWidget {
     ref.read(tfRunningProvider.notifier).state = !running;
   }
 
-  Future<void> _toggleHart(
-      WidgetRef ref, bool running, int port, CommMode mode) async {
+  Future<void> _toggleHart(WidgetRef ref, bool running, int port, CommMode mode,
+      {required String bindHost}) async {
     final notifier = ref.read(connectionProvider.notifier);
     if (running) {
       await notifier.stopHartServer();
@@ -174,19 +176,21 @@ class CommBarWidget extends ConsumerWidget {
         port,
         () => ref.read(hartTableProvider).data,
         (device, col, hex) => hartNotifier.setCellValue(device, col, hex),
+        bindHost: bindHost,
       );
-      globalLog.info('HART', 'HART TCP server started on port $port');
+      globalLog.info('HART', 'HART TCP server started on $bindHost:$port');
     }
   }
 
-  void _toggleModbus(WidgetRef ref, bool running, int port) {
+  void _toggleModbus(WidgetRef ref, bool running, int port,
+      {required String bindHost}) {
     final notifier = ref.read(connectionProvider.notifier);
     if (running) {
       notifier.stopModbus();
       globalLog.info('Modbus', 'Modbus server stopped');
     } else {
-      notifier.startModbus(port);
-      globalLog.info('Modbus', 'Modbus server started on port $port');
+      notifier.startModbus(port, bindHost: bindHost);
+      globalLog.info('Modbus', 'Modbus server started on $bindHost:$port');
     }
   }
 }

@@ -2,6 +2,11 @@ import 'dart:io';
 import 'dart:typed_data';
 import '../../application/notifiers/log_notifier.dart';
 
+class _ModbusRequestException implements Exception {
+  final int code;
+  const _ModbusRequestException(this.code);
+}
+
 typedef ModbusRegGetter = int Function(int address, bool isInput);
 typedef ModbusRegSetter = void Function(int address, int value);
 typedef ModbusCoilGetter = bool Function(int address, bool isInput);
@@ -19,7 +24,16 @@ typedef ModbusCoilSetter = void Function(int address, bool value);
 ///   0x0F – Write Multiple Coils
 ///   0x10 – Write Multiple Registers
 class ModbusTcpServer {
+  static const int _maxAduLength = 260;
+  static const int _maxReceiveBufferLength = 4096;
+  static const int _maxReadBits = 2000;
+  static const int _maxReadRegisters = 125;
+  static const int _maxWriteCoils = 1968;
+  static const int _maxWriteRegisters = 123;
+
   final int port;
+  final InternetAddress bindAddress;
+  final int maxClients;
   final ModbusRegGetter getRegister;
   final ModbusRegSetter setRegister;
   final ModbusCoilGetter getCoil;
@@ -31,21 +45,30 @@ class ModbusTcpServer {
 
   ModbusTcpServer({
     required this.port,
+    InternetAddress? bindAddress,
+    this.maxClients = 32,
     required this.getRegister,
     required this.setRegister,
     required this.getCoil,
     required this.setCoil,
-  });
+  }) : bindAddress = bindAddress ?? InternetAddress.loopbackIPv4;
 
   bool get isRunning => _running;
+  int get boundPort => _server?.port ?? port;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   Future<void> start() async {
     if (_running) return;
-    _server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    if (port < 0 || port > 65535) {
+      throw ArgumentError.value(port, 'port', 'must be between 0 and 65535');
+    }
+    if (maxClients < 1) {
+      throw ArgumentError.value(maxClients, 'maxClients', 'must be positive');
+    }
+    _server = await ServerSocket.bind(bindAddress, port);
     _running = true;
     _server!.listen(_onClient);
-    globalLog.info('Modbus', 'Server started on port $port');
+    globalLog.info('Modbus', 'Server started on port $boundPort');
   }
 
   Future<void> stop() async {
@@ -66,6 +89,11 @@ class ModbusTcpServer {
 
   // ── Client ────────────────────────────────────────────────────────────────
   void _onClient(Socket socket) {
+    if (_clients.length >= maxClients) {
+      globalLog.warning('Modbus', 'Connection limit reached; rejecting client');
+      socket.destroy();
+      return;
+    }
     _clients.add(socket);
     final addr = '${socket.remoteAddress.address}:${socket.remotePort}';
     globalLog.info('Modbus', 'Client connected: $addr');
@@ -73,6 +101,13 @@ class ModbusTcpServer {
     socket.listen(
       (data) {
         buf.addAll(data);
+        if (buf.length > _maxReceiveBufferLength) {
+          globalLog.warning(
+              'Modbus', 'Receive buffer limit exceeded; closing client');
+          _clients.remove(socket);
+          socket.destroy();
+          return;
+        }
         _process(buf, socket);
       },
       onDone: () {
@@ -98,12 +133,13 @@ class ModbusTcpServer {
     // Modbus TCP MBAP header: transaction(2)+protocol(2)+length(2)+unitId(1) = 7 bytes
     while (buf.length >= 7) {
       final transId = (buf[0] << 8) | buf[1];
-      // protocol = buf[2..3] should be 0
+      final protocolId = (buf[2] << 8) | buf[3];
       final pduLen =
           (buf[4] << 8) | buf[5]; // includes unit-id + function + data
       // A valid PDU always has at least a unit id + function code.
-      if (pduLen < 2) {
-        globalLog.warning('Modbus', 'Malformed frame (length=$pduLen), dropping buffer');
+      if (protocolId != 0 || pduLen < 2 || 6 + pduLen > _maxAduLength) {
+        globalLog.warning(
+            'Modbus', 'Malformed frame (length=$pduLen), dropping buffer');
         buf.clear();
         return;
       }
@@ -117,7 +153,8 @@ class ModbusTcpServer {
 
       final response = _handlePDU(fnCode, pduData);
       if (response != null) {
-        globalLog.debug('Modbus', 'FC=0x${fnCode.toRadixString(16).padLeft(2,"0")} unit=$unitId, resp=${response.length}B');
+        globalLog.debug('Modbus',
+            'FC=0x${fnCode.toRadixString(16).padLeft(2, "0")} unit=$unitId, resp=${response.length}B');
         _sendResponse(socket, transId, unitId, response);
       }
     }
@@ -140,6 +177,8 @@ class ModbusTcpServer {
       };
       if (payload == null) return _exception(fn, 0x01);
       return [fn, ...payload];
+    } on _ModbusRequestException catch (e) {
+      return _exception(fn, e.code);
     } catch (_) {
       return _exception(fn, 0x04); // Slave device failure
     }
@@ -147,9 +186,12 @@ class ModbusTcpServer {
 
   // ── Read registers (0x03 / 0x04) ─────────────────────────────────────────
   List<int> _readRegs(List<int> data, {required bool isInput}) {
-    if (data.length < 4) return _exception(isInput ? 0x04 : 0x03, 0x03);
+    if (data.length != 4) throw const _ModbusRequestException(0x03);
     final startAddr = (data[0] << 8) | data[1];
     final count = (data[2] << 8) | data[3];
+    if (count < 1 || count > _maxReadRegisters) {
+      throw const _ModbusRequestException(0x03);
+    }
     final bytes = <int>[count * 2];
     for (int i = 0; i < count; i++) {
       final val = getRegister(startAddr + i, isInput);
@@ -161,9 +203,12 @@ class ModbusTcpServer {
 
   // ── Read bits (0x01 / 0x02) ───────────────────────────────────────────────
   List<int> _readBits(List<int> data, {required bool isInput}) {
-    if (data.length < 4) return _exception(isInput ? 0x02 : 0x01, 0x03);
+    if (data.length != 4) throw const _ModbusRequestException(0x03);
     final startAddr = (data[0] << 8) | data[1];
     final count = (data[2] << 8) | data[3];
+    if (count < 1 || count > _maxReadBits) {
+      throw const _ModbusRequestException(0x03);
+    }
     final byteCount = (count + 7) ~/ 8;
     final bytes = <int>[byteCount];
     for (int b = 0; b < byteCount; b++) {
@@ -181,16 +226,20 @@ class ModbusTcpServer {
 
   // ── Write single coil (0x05) ──────────────────────────────────────────────
   List<int> _writeSingleCoil(List<int> data) {
-    if (data.length < 4) return _exception(0x05, 0x03);
+    if (data.length != 4) throw const _ModbusRequestException(0x03);
     final addr = (data[0] << 8) | data[1];
-    final value = data[2] == 0xFF;
+    final rawValue = (data[2] << 8) | data[3];
+    if (rawValue != 0xFF00 && rawValue != 0x0000) {
+      throw const _ModbusRequestException(0x03);
+    }
+    final value = rawValue == 0xFF00;
     setCoil(addr, value);
     return data.sublist(0, 4); // Echo
   }
 
   // ── Write single register (0x06) ─────────────────────────────────────────
   List<int> _writeSingleReg(List<int> data) {
-    if (data.length < 4) return _exception(0x06, 0x03);
+    if (data.length != 4) throw const _ModbusRequestException(0x03);
     final addr = (data[0] << 8) | data[1];
     final value = (data[2] << 8) | data[3];
     setRegister(addr, value);
@@ -199,30 +248,48 @@ class ModbusTcpServer {
 
   // ── Write multiple coils (0x0F) ───────────────────────────────────────────
   List<int> _writeMultipleCoils(List<int> data) {
-    if (data.length < 5) return _exception(0x0F, 0x03);
+    if (data.length < 5) throw const _ModbusRequestException(0x03);
     final startAddr = (data[0] << 8) | data[1];
     final count = (data[2] << 8) | data[3];
+    final byteCount = data[4];
+    final expectedByteCount = (count + 7) ~/ 8;
+    if (count < 1 ||
+        count > _maxWriteCoils ||
+        byteCount != expectedByteCount ||
+        data.length != 5 + byteCount) {
+      throw const _ModbusRequestException(0x03);
+    }
+    final writes = <(int, bool)>[];
     for (int i = 0; i < count; i++) {
       final byteIdx = i ~/ 8;
       final bitIdx = i % 8;
-      if (5 + byteIdx < data.length) {
-        setCoil(startAddr + i, (data[5 + byteIdx] & (1 << bitIdx)) != 0);
-      }
+      writes.add((startAddr + i, (data[5 + byteIdx] & (1 << bitIdx)) != 0));
+    }
+    for (final (address, value) in writes) {
+      setCoil(address, value);
     }
     return [data[0], data[1], data[2], data[3]];
   }
 
   // ── Write multiple registers (0x10) ──────────────────────────────────────
   List<int> _writeMultipleRegs(List<int> data) {
-    if (data.length < 5) return _exception(0x10, 0x03);
+    if (data.length < 5) throw const _ModbusRequestException(0x03);
     final startAddr = (data[0] << 8) | data[1];
     final count = (data[2] << 8) | data[3];
+    final byteCount = data[4];
+    if (count < 1 ||
+        count > _maxWriteRegisters ||
+        byteCount != count * 2 ||
+        data.length != 5 + byteCount) {
+      throw const _ModbusRequestException(0x03);
+    }
+    final writes = <(int, int)>[];
     for (int i = 0; i < count; i++) {
       final idx = 5 + i * 2;
-      if (idx + 1 < data.length) {
-        final val = (data[idx] << 8) | data[idx + 1];
-        setRegister(startAddr + i, val);
-      }
+      writes.add((startAddr + i, (data[idx] << 8) | data[idx + 1]));
+    }
+    for (final (address, value) in writes) {
+      setRegister(address, value);
     }
     return [data[0], data[1], data[2], data[3]];
   }

@@ -17,6 +17,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   LogLevel? _filterLevel;
   bool _autoScroll = true;
   double _fontSize = 11.0;
+  LogEntry? _lastAutoScrolledEntry;
   static const double _minFont = 8.0;
   static const double _maxFont = 20.0;
 
@@ -33,16 +34,21 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
         ? logs
         : logs.where((e) => e.level == _filterLevel).toList();
 
-    // Auto-scroll to bottom when new entries arrive
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_autoScroll && _scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    // Auto-scroll only for an appended entry. Rebuilds caused by filtering,
+    // zooming or connection state should not start overlapping animations.
+    final newestEntry = logs.isEmpty ? null : logs.last;
+    if (!identical(newestEntry, _lastAutoScrolledEntry)) {
+      _lastAutoScrolledEntry = newestEntry;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _autoScroll && _scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            _scrollCtrl.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
 
     return Column(children: [
       // ── Toolbar ─────────────────────────────────────────────────────────
@@ -105,7 +111,12 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
             const SizedBox(width: 4),
             Switch(
               value: _autoScroll,
-              onChanged: (v) => setState(() => _autoScroll = v),
+              onChanged: (v) => setState(() {
+                _autoScroll = v;
+                // Re-enabling should preserve the previous behavior of
+                // immediately moving to the current tail.
+                if (v) _lastAutoScrolledEntry = null;
+              }),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ]),

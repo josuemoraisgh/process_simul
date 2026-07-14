@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/react_var.dart';
 import '../../infrastructure/hart/hart_comm.dart';
@@ -55,6 +57,7 @@ typedef CellWriter = void Function(String device, String col, String hex);
 class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final HartTableNotifier _hartTable;
   final ModbusTableNotifier _modbusTable;
+  final HartTransmitter _hartTransmitter;
   void Function()? _removeModbusTableListener;
 
   HartCommServer? _hartServer;
@@ -67,8 +70,10 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final _coilMap = <int, bool>{}; // Coils            (master-writable)
   final _diMap = <int, bool>{}; // Discrete Inputs    (read-only, from process)
 
-  ConnectionNotifier(this._hartTable, this._modbusTable)
-      : super(const ConnectionState()) {
+  ConnectionNotifier(this._hartTable, this._modbusTable,
+      {HartTransmitter? hartTransmitter})
+      : _hartTransmitter = hartTransmitter ?? HartTransmitter.standard(),
+        super(const ConnectionState()) {
     // Keep the Modbus register/bit maps in sync with the simulated process
     // values (HART table) and the configured address/formula table.
     _hartTable.dataVersionNotifier.addListener(_onHartDataChanged);
@@ -78,13 +83,16 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
 
   // ── HART Server ────────────────────────────────────────────────────────────
   Future<void> startHartServer(
-      int port, TableGetter getTable, CellWriter writeCell) async {
+      int port, TableGetter getTable, CellWriter writeCell,
+      {String bindHost = '127.0.0.1'}) async {
     await stopHartServer();
     try {
       _hartServer = HartCommServer(
         port: port,
+        bindAddress: InternetAddress(bindHost),
         getTable: getTable,
         writeCell: writeCell,
+        transmitter: _hartTransmitter,
       );
       await _hartServer!.start();
       state = state.copyWith(
@@ -120,6 +128,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
         portName: portName,
         getTable: getTable,
         writeCell: writeCell,
+        transmitter: _hartTransmitter,
       );
       await _hartSerial!.start();
       state = state.copyWith(
@@ -131,11 +140,12 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   }
 
   // ── Modbus Server ──────────────────────────────────────────────────────────
-  Future<void> startModbus(int port) async {
+  Future<void> startModbus(int port, {String bindHost = '127.0.0.1'}) async {
     await stopModbus();
     try {
       _modbusServer = ModbusTcpServer(
         port: port,
+        bindAddress: InternetAddress(bindHost),
         getRegister: (addr, isInput) =>
             (isInput ? _irMap[addr] : _hrMap[addr]) ?? 0,
         setRegister: (addr, val) => _hrMap[addr] = val,

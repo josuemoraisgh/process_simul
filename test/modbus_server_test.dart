@@ -36,12 +36,25 @@ List<int> _mbapRequest({
 }) {
   final len = pdu.length + 1; // unitId + pdu
   return [
-    (transId >> 8) & 0xFF, transId & 0xFF,
-    0x00, 0x00,
-    (len >> 8) & 0xFF, len & 0xFF,
+    (transId >> 8) & 0xFF,
+    transId & 0xFF,
+    0x00,
+    0x00,
+    (len >> 8) & 0xFF,
+    len & 0xFF,
     unitId,
     ...pdu,
   ];
+}
+
+/// Reserves an OS-assigned port and immediately releases it for the server.
+/// This avoids fixed/random ranges colliding with other test processes.
+Future<int> _ephemeralPort() async {
+  final reservation =
+      await ServerSocket.bind(InternetAddress.loopbackIPv4, 0, shared: false);
+  final port = reservation.port;
+  await reservation.close();
+  return port;
 }
 
 void main() {
@@ -58,7 +71,7 @@ void main() {
       irMap.clear();
       coilMap.clear();
       diMap.clear();
-      port = 15500 + (DateTime.now().microsecondsSinceEpoch % 500);
+      port = await _ephemeralPort();
       server = ModbusTcpServer(
         port: port,
         getRegister: (addr, isInput) =>
@@ -161,6 +174,121 @@ void main() {
       expect(response[9], 0x05); // bits 0 and 2 set -> 0b101
     });
 
+    test('Read Discrete Inputs (0x02) uses the input bit map', () async {
+      diMap[7] = true;
+      diMap[8] = false;
+      diMap[9] = true;
+
+      final socket = await Socket.connect('127.0.0.1', port);
+      try {
+        socket.add(_mbapRequest(
+          transId: 0x0006,
+          unitId: 2,
+          pdu: [0x02, 0x00, 0x07, 0x00, 0x03],
+        ));
+        final response = await _readOneFrame(socket);
+
+        expect(response[6], 2);
+        expect(response.sublist(7), [0x02, 0x01, 0x05]);
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    test('Read Input Registers (0x04) returns big-endian register values',
+        () async {
+      irMap[4] = 0x0102;
+      irMap[5] = 0xABCD;
+
+      final socket = await Socket.connect('127.0.0.1', port);
+      try {
+        socket.add(_mbapRequest(
+          transId: 0x0007,
+          unitId: 1,
+          pdu: [0x04, 0x00, 0x04, 0x00, 0x02],
+        ));
+        final response = await _readOneFrame(socket);
+
+        expect(response.sublist(7), [0x04, 0x04, 0x01, 0x02, 0xAB, 0xCD]);
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    test('Write Multiple Coils (0x0F) unpacks LSB-first and echoes range',
+        () async {
+      final socket = await Socket.connect('127.0.0.1', port);
+      try {
+        socket.add(_mbapRequest(
+          transId: 0x0008,
+          unitId: 1,
+          pdu: [
+            0x0F,
+            0x00, 0x0A, // start address 10
+            0x00, 0x0A, // 10 coils
+            0x02, // two packed bytes
+            0x4D, 0x03, // 1,0,1,1,0,0,1,0,1,1
+          ],
+        ));
+        final response = await _readOneFrame(socket);
+
+        expect(response.sublist(7), [0x0F, 0x00, 0x0A, 0x00, 0x0A]);
+        expect(
+          [for (var i = 10; i < 20; i++) coilMap[i]],
+          [true, false, true, true, false, false, true, false, true, true],
+        );
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    test('Write Multiple Registers (0x10) writes words and echoes range',
+        () async {
+      final socket = await Socket.connect('127.0.0.1', port);
+      try {
+        socket.add(_mbapRequest(
+          transId: 0x0009,
+          unitId: 1,
+          pdu: [
+            0x10,
+            0x00, 0x14, // start address 20
+            0x00, 0x02, // two registers
+            0x04,
+            0x12, 0x34,
+            0xFE, 0xDC,
+          ],
+        ));
+        final response = await _readOneFrame(socket);
+
+        expect(response.sublist(7), [0x10, 0x00, 0x14, 0x00, 0x02]);
+        expect(hrMap[20], 0x1234);
+        expect(hrMap[21], 0xFEDC);
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    test(
+        'truncated function payload receives a bounded failure response and '
+        'does not stop the server', () async {
+      final socket = await Socket.connect('127.0.0.1', port);
+      try {
+        socket.add(_mbapRequest(
+          transId: 0x000A,
+          unitId: 1,
+          pdu: [0x04, 0x00],
+        ));
+        final response = await _readOneFrame(socket);
+
+        // Characterizes only the safety boundary. The exact nested exception
+        // payload is intentionally not frozen because it is protocol-ambiguous.
+        expect(response.length, inInclusiveRange(9, 16));
+        expect(server.isRunning, isTrue);
+      } finally {
+        socket.destroy();
+      }
+    });
+
     test('Unsupported function code returns a well-formed exception PDU',
         () async {
       final socket = await Socket.connect('127.0.0.1', port);
@@ -178,7 +306,8 @@ void main() {
       expect(response.length, 9);
     });
 
-    test('malformed frame (declared length < 2) is dropped without crashing '
+    test(
+        'malformed frame (declared length < 2) is dropped without crashing '
         'the connection', () async {
       final socket = await Socket.connect('127.0.0.1', port);
       // Length field of 1 is invalid (can't even hold unitId+function code).

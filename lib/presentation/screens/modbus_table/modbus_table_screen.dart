@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../application/providers/app_providers.dart';
 import '../../../application/notifiers/modbus_table_notifier.dart';
-import '../../../infrastructure/hart/hart_type_converter.dart';
+import '../../../infrastructure/hart/hart_transmitter.dart';
 
 class ModbusTableScreen extends ConsumerStatefulWidget {
   const ModbusTableScreen({super.key});
@@ -796,58 +796,4 @@ class _RemoveVariableDialogState extends State<_RemoveVariableDialog> {
           ),
         ],
       );
-}
-
-// Forward reference for expression evaluation in UI
-class HartTransmitter {
-  static double evaluateExpr(
-      String expr, Map<String, Map<String, dynamic>> allDevices) {
-    try {
-      String resolved = expr;
-      resolved = resolved.replaceAllMapped(
-        RegExp(r'HART\.(\w+)\.(\w+)'),
-        (m) {
-          final device = m.group(1)!;
-          final col = m.group(2)!;
-          final v = allDevices[device]?[col];
-          if (v == null) return '0';
-          final hex =
-              v.evaluatedHex?.isEmpty == false ? v.evaluatedHex : v.rawValue;
-          if (v.typeStr?.toUpperCase().contains('FLOAT') == true) {
-            return HartTypeConverter.hexToDouble(hex).toString();
-          }
-          return int.tryParse(hex, radix: 16)?.toString() ?? '0';
-        },
-      );
-      resolved = resolved.replaceAllMapped(
-        RegExp(r'int\(([^)]+)\)'),
-        (m) => _eval(m.group(1)!).truncate().toString(),
-      );
-      return _eval(resolved);
-    } catch (_) {
-      return 0.0;
-    }
-  }
-
-  static double _eval(String e) {
-    e = e.trim();
-    for (int i = e.length - 1; i > 0; i--) {
-      if (e[i] == '+') {
-        return _eval(e.substring(0, i)) + _eval(e.substring(i + 1));
-      }
-      if (e[i] == '-') {
-        return _eval(e.substring(0, i)) - _eval(e.substring(i + 1));
-      }
-    }
-    for (int i = e.length - 1; i > 0; i--) {
-      if (e[i] == '*') {
-        return _eval(e.substring(0, i)) * _eval(e.substring(i + 1));
-      }
-      if (e[i] == '/') {
-        final r = _eval(e.substring(i + 1));
-        return r == 0 ? 0 : _eval(e.substring(0, i)) / r;
-      }
-    }
-    return double.tryParse(e) ?? 0.0;
-  }
 }

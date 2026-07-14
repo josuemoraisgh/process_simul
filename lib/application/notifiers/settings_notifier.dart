@@ -1,8 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/enums/db_model.dart';
 
 class AppSettings {
+  static const int minPort = 1;
+  static const int maxPort = 65535;
+  static const int minTfStepMs = 10;
+  static const int maxTfStepMs = 5000;
   final CommMode hartMode;
   final String hartSerialPort;
   final String hartTcpHost;
@@ -20,6 +26,39 @@ class AppSettings {
     this.tfStepMs = 50,
     this.darkTheme = true,
   });
+
+  static bool isValidPort(int value) => value >= minPort && value <= maxPort;
+
+  static bool isValidTfStep(int value) =>
+      value >= minTfStepMs && value <= maxTfStepMs;
+
+  static bool isValidBindAddress(String value) =>
+      InternetAddress.tryParse(value.trim()) != null;
+
+  void validate() {
+    if (!isValidPort(hartServerPort)) {
+      throw RangeError.range(
+        hartServerPort,
+        minPort,
+        maxPort,
+        'hartServerPort',
+      );
+    }
+    if (!isValidPort(modbusPort)) {
+      throw RangeError.range(modbusPort, minPort, maxPort, 'modbusPort');
+    }
+    if (!isValidTfStep(tfStepMs)) {
+      throw RangeError.range(
+        tfStepMs,
+        minTfStepMs,
+        maxTfStepMs,
+        'tfStepMs',
+      );
+    }
+    if (!isValidBindAddress(hartTcpHost)) {
+      throw FormatException('Invalid server bind address', hartTcpHost);
+    }
+  }
 
   AppSettings copyWith({
     CommMode? hartMode,
@@ -54,20 +93,29 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
+    final storedHartPort = p.getInt(_keySrvPort) ?? 5094;
+    final storedModbusPort = p.getInt(_keyModbusPort) ?? 502;
+    final storedTfStep = p.getInt(_keyTfStepMs) ?? 50;
     state = AppSettings(
       hartMode: p.getString(_keyHartMode) == 'serial'
           ? CommMode.serial
           : CommMode.tcp,
       hartSerialPort: p.getString(_keySerialPort) ?? 'COM1',
-      hartTcpHost: p.getString(_keyTcpHost) ?? '127.0.0.1',
-      hartServerPort: p.getInt(_keySrvPort) ?? 5094,
-      modbusPort: p.getInt(_keyModbusPort) ?? 502,
-      tfStepMs: p.getInt(_keyTfStepMs) ?? 50,
+      hartTcpHost: AppSettings.isValidBindAddress(
+              p.getString(_keyTcpHost) ?? '127.0.0.1')
+          ? p.getString(_keyTcpHost) ?? '127.0.0.1'
+          : '127.0.0.1',
+      hartServerPort:
+          AppSettings.isValidPort(storedHartPort) ? storedHartPort : 5094,
+      modbusPort:
+          AppSettings.isValidPort(storedModbusPort) ? storedModbusPort : 502,
+      tfStepMs: AppSettings.isValidTfStep(storedTfStep) ? storedTfStep : 50,
       darkTheme: p.getBool(_keyDarkTheme) ?? true,
     );
   }
 
   Future<void> save(AppSettings s) async {
+    s.validate();
     state = s;
     final p = await SharedPreferences.getInstance();
     await p.setString(

@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:async';
 import 'dart:typed_data';
 import '../../domain/entities/react_var.dart';
 import '../../application/notifiers/log_notifier.dart';
+import 'hart_frame.dart';
 import 'hart_transmitter.dart';
 
 typedef HartTableGetter = Map<String, Map<String, ReactVar>> Function();
@@ -15,8 +15,11 @@ typedef HartCellWriter = void Function(
 /// parses frames, delegates to [HartTransmitter], and sends back responses.
 class HartCommServer {
   final int port;
+  final InternetAddress bindAddress;
+  final int maxClients;
   final HartTableGetter getTable;
   final HartCellWriter writeCell;
+  final HartTransmitter transmitter;
 
   ServerSocket? _server;
   final List<Socket> _clients = [];
@@ -24,24 +27,35 @@ class HartCommServer {
 
   HartCommServer({
     required this.port,
+    InternetAddress? bindAddress,
+    this.maxClients = 32,
     required this.getTable,
     required this.writeCell,
-  });
+    HartTransmitter? transmitter,
+  })  : bindAddress = bindAddress ?? InternetAddress.loopbackIPv4,
+        transmitter = transmitter ?? HartTransmitter.standard();
 
   bool get isRunning => _running;
+  int get boundPort => _server?.port ?? port;
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
   Future<void> start() async {
     if (_running) return;
-    _server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    if (port < 0 || port > 65535) {
+      throw ArgumentError.value(port, 'port', 'must be between 0 and 65535');
+    }
+    if (maxClients < 1) {
+      throw ArgumentError.value(maxClients, 'maxClients', 'must be positive');
+    }
+    _server = await ServerSocket.bind(bindAddress, port);
     _running = true;
     _server!.listen(_onClient);
-    globalLog.info('HART', 'Server started on port $port');
+    globalLog.info('HART', 'Server started on port $boundPort');
   }
 
   Future<void> stop() async {
     _running = false;
-    for (final c in _clients) {
+    for (final c in List<Socket>.from(_clients)) {
       try {
         c.destroy();
       } catch (_) {}
@@ -54,14 +68,27 @@ class HartCommServer {
 
   // ── Client ────────────────────────────────────────────────────────────────
   void _onClient(Socket socket) {
+    if (_clients.length >= maxClients) {
+      globalLog.warning('HART', 'Connection limit reached; rejecting client');
+      socket.destroy();
+      return;
+    }
     _clients.add(socket);
     final addr = '${socket.remoteAddress.address}:${socket.remotePort}';
     globalLog.info('HART', 'Client connected: $addr');
-    final buf = <int>[];
+    final decoder = HartFrameDecoder();
     socket.listen(
       (data) {
-        buf.addAll(data);
-        _flush(buf, socket);
+        final frames = decoder.add(data);
+        for (final frame in frames) {
+          if (frame.isMasterToSlave) _handleFrame(frame, socket);
+        }
+        if (decoder.overflowed) {
+          globalLog.warning(
+              'HART', 'Receive buffer limit exceeded; closing client');
+          _clients.remove(socket);
+          socket.destroy();
+        }
       },
       onDone: () {
         _clients.remove(socket);
@@ -81,69 +108,13 @@ class HartCommServer {
     );
   }
 
-  // ── Frame extraction ─────────────────────────────────────────────────────
-  void _flush(List<int> buf, Socket socket) {
-    // Consume until preamble
-    while (buf.isNotEmpty && buf.first != 0xFF) {
-      buf.removeAt(0);
-    }
-    if (buf.length < 6) return;
-
-    // Find end of preamble
-    int pos = 0;
-    while (pos < buf.length && buf[pos] == 0xFF) {
-      pos++;
-    }
-    if (pos >= buf.length) return;
-
-    final delim = buf[pos];
-    final isLong = (delim & 0x80) != 0;
-    final addrLen = isLong ? 5 : 1;
-    // header: delim(1) + addr(addrLen) + cmd(1) + bytecount(1) = addrLen+3
-    final headerEnd = pos + 1 + addrLen + 2;
-    if (buf.length <= headerEnd) return;
-    final byteCount = buf[headerEnd - 1];
-    final totalNeeded = headerEnd + byteCount + 1; // +1 for checksum
-    if (buf.length < totalNeeded) return;
-
-    final frame = List<int>.from(buf.sublist(0, totalNeeded));
-    buf.removeRange(0, totalNeeded);
-
-    _handleFrame(frame, socket);
-
-    // Process further frames in buffer
-    if (buf.isNotEmpty) _flush(buf, socket);
-  }
-
   // ── Frame processing ──────────────────────────────────────────────────────
-  void _handleFrame(List<int> raw, Socket socket) {
-    int pos = 0;
-    while (pos < raw.length && raw[pos] == 0xFF) {
-      pos++;
-    }
-    if (pos >= raw.length) return;
-
-    final delim = raw[pos++];
-    final isLong = (delim & 0x80) != 0;
-    int pollAddr = 0;
-    List<int> addrBytes =
-        []; // full address bytes (preserves master/burst bits)
-
-    if (isLong) {
-      if (pos + 5 > raw.length) return;
-      addrBytes = List.from(raw.sublist(pos, pos + 5));
-      pos += 5;
-    } else {
-      if (pos >= raw.length) return;
-      addrBytes = [raw[pos++]];
-      pollAddr = addrBytes[0] & 0x3F;
-    }
-
-    if (pos + 2 > raw.length) return;
-    final command = raw[pos++];
-    final byteCount = raw[pos++];
-    if (pos + byteCount > raw.length) return;
-    final body = raw.sublist(pos, pos + byteCount);
+  void _handleFrame(HartFrame frame, Socket socket) {
+    final isLong = frame.isLongAddress;
+    final addrBytes = isLong ? frame.longAddress : [frame.address];
+    final pollAddr = isLong ? 0 : frame.address & 0x3F;
+    final command = frame.command;
+    final body = frame.body;
 
     // Route to correct device
     final table = getTable();
@@ -183,30 +154,13 @@ class HartCommServer {
       }
     }
 
-    if (device.isEmpty && table.isNotEmpty) {
-      // Fallback for address 0 / no match: use device with highest polling address
-      int maxAddr = -1;
-      for (final e in table.entries) {
-        final pa = int.tryParse(e.value['polling_address']?.rawValue ?? '00',
-                radix: 16) ??
-            0;
-        if (pa > maxAddr) {
-          maxAddr = pa;
-          device = e.value;
-          deviceName = e.key;
-        }
-      }
+    if (device.isEmpty) {
+      globalLog.warning('HART', 'Frame for unknown device address dropped');
+      return;
     }
 
-    // Log received frame
-    final rxHex = raw
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join()
-        .toUpperCase();
-    globalLog.debug('HART', 'Rx: $rxHex');
-
     // Generate response
-    final responseBody = HartTransmitter.process(
+    final responseBody = transmitter.dispatch(
       command: command,
       requestBody: body,
       device: device,
