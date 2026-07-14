@@ -57,6 +57,15 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# flutter_inappwebview_windows 0.6.0 still uses <experimental/coroutine>.
+# MSVC 14.51 (Visual Studio 18) turns that deprecation into STL1011, which
+# breaks GitHub Actions builds. Keep the workaround scoped to the affected
+# plugin; remove it after the plugin migrates to the C++20 coroutine header.
+if(TARGET flutter_inappwebview_windows_plugin)
+  target_compile_definitions(flutter_inappwebview_windows_plugin PRIVATE
+    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+endif()
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

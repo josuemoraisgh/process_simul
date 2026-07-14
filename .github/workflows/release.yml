@@ -28,7 +28,10 @@ env:
 jobs:
   build-windows-msi:
     name: Windows (Flutter + WiX MSI)
-    runs-on: windows-latest
+    # Pin the image so a windows-latest toolchain migration cannot silently
+    # break native Flutter plugins. CMake also carries a scoped compatibility
+    # definition for MSVC 14.51+.
+    runs-on: windows-2022
 
     steps:
       - name: Checkout código
@@ -84,7 +87,7 @@ jobs:
 
       - name: Analisar código
         shell: bash
-        run: flutter analyze --no-fatal-infos || true
+        run: flutter analyze --no-fatal-infos
 
       - name: Normalizar versão (X.Y.Z.W)
         id: ver
