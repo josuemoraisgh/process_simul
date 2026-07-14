@@ -64,17 +64,23 @@ class DiscreteSS {
 
   /// Returns the system's DC gain for normalisation.
   double get dcGain {
-    // For y = C(I-A)^{-1}B + D, approximate for 1st/2nd order
+    // For y = C(I-A)^{-1}B + D. Solved numerically by iterating the
+    // recursion to steady-state with u=1, running until consecutive
+    // iterations stop changing (bounded, so a marginally-stable system
+    // can't spin forever).
     if (A.isEmpty) return D;
-    // Simple numeric: run to steady-state with u=1
     double y = 0;
     final xSteady = List.filled(A.length, 0.0);
-    for (int k = 0; k < 500; k++) {
+    for (int k = 0; k < 200000; k++) {
       final xNext = _mul(A, xSteady);
+      bool converged = true;
       for (int i = 0; i < xSteady.length; i++) {
-        xSteady[i] = xNext[i] + B[i];
+        final v = xNext[i] + B[i];
+        if ((v - xSteady[i]).abs() > 1e-12) converged = false;
+        xSteady[i] = v;
       }
       y = _dot(C, xSteady) + D;
+      if (converged) break;
     }
     return y.abs() < 1e-9 ? 1.0 : y;
   }
@@ -134,12 +140,23 @@ DiscreteSS buildDiscreteSSFromTF(
     });
   });
   final Bc = List.generate(n, (i) => i == n - 1 ? 1.0 : 0.0);
+
+  // Right-align the numerator against an (n+1)-length coefficient array
+  // [b0..bn], padding missing high-order terms with zero when the numerator
+  // is strictly proper (shorter than the denominator).
+  final bFull = List<double>.filled(n + 1, 0.0);
+  final offset = (n + 1) - numN.length;
+  for (int k = 0; k < numN.length; k++) {
+    final idx = offset + k;
+    if (idx >= 0 && idx < bFull.length) bFull[idx] = numN[k];
+  }
+  final Dc = bFull[0];
+  // Controllable canonical form output coefficients: c_i = b_i - D*a_i,
+  // ordered to match Ac/Bc (state x_n is driven directly by the input).
   final Cc = List.generate(n, (i) {
-    final ki = n - 1 - i;
-    final numVal = ki < numN.length ? numN[ki] : 0.0;
-    return numVal;
+    final k = n - i;
+    return bFull[k] - Dc * denN[k];
   });
-  final Dc = numN.length > n ? numN[0] : 0.0;
 
   // Euler: Ad = I + Ts*Ac, Bd = Ts*Bc
   final Ad = List.generate(

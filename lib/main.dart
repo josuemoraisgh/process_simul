@@ -38,6 +38,11 @@ Future<void> main() async {
   // Load HART table (non-blocking – UI shows loader while pending)
   container.read(hartTableProvider.notifier).load();
 
+  // Load Modbus variable/address table (non-blocking) so register values are
+  // available as soon as the Modbus server is started, without requiring the
+  // user to open the Modbus table screen first.
+  container.read(modbusTableProvider.notifier).load();
+
   runApp(
     UncontrolledProviderScope(
       container: container,

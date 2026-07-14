@@ -50,7 +50,10 @@ class ModbusTcpServer {
 
   Future<void> stop() async {
     _running = false;
-    for (final c in _clients) {
+    // Iterate a copy: destroy() synchronously triggers each socket's onDone
+    // handler, which removes itself from _clients — mutating the list
+    // being iterated if we don't snapshot it first.
+    for (final c in List<Socket>.from(_clients)) {
       try {
         c.destroy();
       } catch (_) {}
@@ -93,11 +96,17 @@ class ModbusTcpServer {
   // ── PDU processing ────────────────────────────────────────────────────────
   void _process(List<int> buf, Socket socket) {
     // Modbus TCP MBAP header: transaction(2)+protocol(2)+length(2)+unitId(1) = 7 bytes
-    while (buf.length >= 8) {
+    while (buf.length >= 7) {
       final transId = (buf[0] << 8) | buf[1];
       // protocol = buf[2..3] should be 0
       final pduLen =
           (buf[4] << 8) | buf[5]; // includes unit-id + function + data
+      // A valid PDU always has at least a unit id + function code.
+      if (pduLen < 2) {
+        globalLog.warning('Modbus', 'Malformed frame (length=$pduLen), dropping buffer');
+        buf.clear();
+        return;
+      }
       final totalNeeded = 6 + pduLen;
       if (buf.length < totalNeeded) return;
 
@@ -109,33 +118,28 @@ class ModbusTcpServer {
       final response = _handlePDU(fnCode, pduData);
       if (response != null) {
         globalLog.debug('Modbus', 'FC=0x${fnCode.toRadixString(16).padLeft(2,"0")} unit=$unitId, resp=${response.length}B');
-        _sendResponse(socket, transId, unitId, fnCode, response);
+        _sendResponse(socket, transId, unitId, response);
       }
     }
   }
 
+  /// Returns the full response PDU (function code byte + payload), or `null`
+  /// if no response should be sent.
   List<int>? _handlePDU(int fn, List<int> data) {
     try {
-      switch (fn) {
-        case 0x01:
-          return _readBits(data, isInput: false); // Read Coils
-        case 0x02:
-          return _readBits(data, isInput: true); // Read DI
-        case 0x03:
-          return _readRegs(data, isInput: false); // Read HR
-        case 0x04:
-          return _readRegs(data, isInput: true); // Read IR
-        case 0x05:
-          return _writeSingleCoil(data);
-        case 0x06:
-          return _writeSingleReg(data);
-        case 0x0F:
-          return _writeMultipleCoils(data);
-        case 0x10:
-          return _writeMultipleRegs(data);
-        default:
-          return _exception(fn, 0x01); // Illegal function
-      }
+      final payload = switch (fn) {
+        0x01 => _readBits(data, isInput: false), // Read Coils
+        0x02 => _readBits(data, isInput: true), // Read DI
+        0x03 => _readRegs(data, isInput: false), // Read HR
+        0x04 => _readRegs(data, isInput: true), // Read IR
+        0x05 => _writeSingleCoil(data),
+        0x06 => _writeSingleReg(data),
+        0x0F => _writeMultipleCoils(data),
+        0x10 => _writeMultipleRegs(data),
+        _ => null, // Illegal function
+      };
+      if (payload == null) return _exception(fn, 0x01);
+      return [fn, ...payload];
     } catch (_) {
       return _exception(fn, 0x04); // Slave device failure
     }
@@ -224,18 +228,19 @@ class ModbusTcpServer {
   }
 
   // ── Exception response ────────────────────────────────────────────────────
+  /// Full exception PDU: function code (with error bit set) + exception code.
   List<int> _exception(int fn, int code) => [fn | 0x80, code];
 
   // ── Send MBAP-wrapped response ────────────────────────────────────────────
-  void _sendResponse(
-      Socket socket, int transId, int unitId, int fn, List<int> data) {
-    final pduLen = 1 + data.length; // unitId + data
+  /// [pdu] is the full response PDU, i.e. function code byte + payload.
+  void _sendResponse(Socket socket, int transId, int unitId, List<int> pdu) {
+    final pduLen = 1 + pdu.length; // unitId + pdu (function code + data)
     final packet = Uint8List.fromList([
       (transId >> 8) & 0xFF, transId & 0xFF, // Transaction ID
       0x00, 0x00, // Protocol ID (Modbus)
       (pduLen >> 8) & 0xFF, pduLen & 0xFF, // Length
       unitId, // Unit ID
-      ...data, // PDU
+      ...pdu, // PDU (function code + data)
     ]);
     try {
       socket.add(packet);

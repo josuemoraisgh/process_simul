@@ -44,7 +44,10 @@ final hartTableProvider =
 // ── Connection (HART server + Modbus server) ─────────────────────────────────
 final connectionProvider =
     StateNotifierProvider<ConnectionNotifier, ConnectionState>(
-  (_) => ConnectionNotifier(),
+  (ref) => ConnectionNotifier(
+    ref.watch(hartTableProvider.notifier),
+    ref.watch(modbusTableProvider.notifier),
+  ),
 );
 
 // ── Logs ─────────────────────────────────────────────────────────────────────

@@ -2,8 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/react_var.dart';
 import '../../infrastructure/hart/hart_comm.dart';
 import '../../infrastructure/hart/hart_serial_comm.dart';
+import '../../infrastructure/hart/hart_transmitter.dart';
 import '../../infrastructure/modbus/modbus_server.dart';
+import '../../infrastructure/modbus/modbus_value_parser.dart';
+import 'hart_table_notifier.dart';
 import 'log_notifier.dart';
+import 'modbus_table_notifier.dart';
 
 /// State for HART server and Modbus server connection.
 class ConnectionState {
@@ -49,16 +53,28 @@ typedef TableGetter = Map<String, Map<String, ReactVar>> Function();
 typedef CellWriter = void Function(String device, String col, String hex);
 
 class ConnectionNotifier extends StateNotifier<ConnectionState> {
+  final HartTableNotifier _hartTable;
+  final ModbusTableNotifier _modbusTable;
+  void Function()? _removeModbusTableListener;
+
   HartCommServer? _hartServer;
   HartSerialServer? _hartSerial;
   ModbusTcpServer? _modbusServer;
 
-  // Modbus register maps
-  final _hrMap = <int, int>{}; // Holding Registers (writable)
-  final _irMap = <int, int>{}; // Input Registers   (readable)
-  final _coilMap = <int, bool>{};
+  // Modbus register/bit maps
+  final _hrMap = <int, int>{}; // Holding Registers  (master-writable)
+  final _irMap = <int, int>{}; // Input Registers    (read-only, from process)
+  final _coilMap = <int, bool>{}; // Coils            (master-writable)
+  final _diMap = <int, bool>{}; // Discrete Inputs    (read-only, from process)
 
-  ConnectionNotifier() : super(const ConnectionState());
+  ConnectionNotifier(this._hartTable, this._modbusTable)
+      : super(const ConnectionState()) {
+    // Keep the Modbus register/bit maps in sync with the simulated process
+    // values (HART table) and the configured address/formula table.
+    _hartTable.dataVersionNotifier.addListener(_onHartDataChanged);
+    _removeModbusTableListener =
+        _modbusTable.addListener(_onModbusTableChanged);
+  }
 
   // ── HART Server ────────────────────────────────────────────────────────────
   Future<void> startHartServer(
@@ -123,7 +139,8 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
         getRegister: (addr, isInput) =>
             (isInput ? _irMap[addr] : _hrMap[addr]) ?? 0,
         setRegister: (addr, val) => _hrMap[addr] = val,
-        getCoil: (addr, isInput) => _coilMap[addr] ?? false,
+        getCoil: (addr, isInput) =>
+            isInput ? (_diMap[addr] ?? false) : (_coilMap[addr] ?? false),
         setCoil: (addr, val) => _coilMap[addr] = val,
       );
       await _modbusServer!.start();
@@ -141,12 +158,73 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
     state = state.copyWith(modbusRunning: false, modbusError: null);
   }
 
-  // ── Register sync (called by HartTableNotifier on data change) ─────────────
+  // ── Register sync ───────────────────────────────────────────────────────────
   void syncHrRegister(int address, int value) => _hrMap[address] = value;
   void syncIrRegister(int address, int value) => _irMap[address] = value;
 
+  void _onHartDataChanged() => _refreshReadOnlyPoints(_modbusTable.state);
+
+  void _onModbusTableChanged(ModbusTableState mbState) {
+    _refreshReadOnlyPoints(mbState);
+    _seedWritablePoints(mbState);
+  }
+
+  /// Pushes the current computed value of every 'ir'/'di' variable from the
+  /// Modbus address table into the read-only register/bit maps. These points
+  /// mirror the simulated process, so they are safe to overwrite every tick.
+  void _refreshReadOnlyPoints(ModbusTableState mbState) {
+    for (final v in mbState.data.values) {
+      final (_, _, mbPoint, addressStr, formula) = v;
+      if (mbPoint != 'ir' && mbPoint != 'di') continue;
+      final wireAddr = _wireAddress(addressStr);
+      if (wireAddr == null) continue;
+      final value = _evalPointValue(formula);
+      if (mbPoint == 'ir') {
+        syncIrRegister(wireAddr, value.truncate() & 0xFFFF);
+      } else {
+        _diMap[wireAddr] = value != 0;
+      }
+    }
+  }
+
+  /// Seeds 'hr'/'co' variables with their configured default value the first
+  /// time they are seen, without clobbering values already written by a
+  /// connected Modbus master.
+  void _seedWritablePoints(ModbusTableState mbState) {
+    for (final v in mbState.data.values) {
+      final (_, _, mbPoint, addressStr, formula) = v;
+      if (mbPoint != 'hr' && mbPoint != 'co') continue;
+      final wireAddr = _wireAddress(addressStr);
+      if (wireAddr == null) continue;
+      if (mbPoint == 'hr' && !_hrMap.containsKey(wireAddr)) {
+        _hrMap[wireAddr] = _evalPointValue(formula).truncate() & 0xFFFF;
+      } else if (mbPoint == 'co' && !_coilMap.containsKey(wireAddr)) {
+        _coilMap[wireAddr] = _evalPointValue(formula) != 0;
+      }
+    }
+  }
+
+  double _evalPointValue(String formula) {
+    if (formula.startsWith('@')) {
+      return HartTransmitter.evaluateExpr(
+          formula.substring(1), _hartTable.state.data);
+    }
+    return ModbusValueParser.parseLiteral(formula);
+  }
+
+  /// Converts the 1-based address configured in the Modbus table (as shown
+  /// to the user, e.g. "1" for holding/input register 40001/30001) into the
+  /// 0-based address used on the wire by the Modbus TCP PDU.
+  int? _wireAddress(String addressStr) {
+    final addr = int.tryParse(addressStr.trim());
+    if (addr == null) return null;
+    return addr > 0 ? addr - 1 : addr;
+  }
+
   @override
   void dispose() {
+    _hartTable.dataVersionNotifier.removeListener(_onHartDataChanged);
+    _removeModbusTableListener?.call();
     _hartServer?.stop();
     _hartSerial?.stop();
     _modbusServer?.stop();

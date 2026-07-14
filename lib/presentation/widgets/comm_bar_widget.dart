@@ -113,6 +113,14 @@ class CommBarWidget extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis),
             const SizedBox(width: 8),
           ],
+          if (conn.modbusError != null) ...[
+            const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+            const SizedBox(width: 4),
+            Text(conn.modbusError!,
+                style: const TextStyle(fontSize: 11, color: AppColors.error),
+                overflow: TextOverflow.ellipsis),
+            const SizedBox(width: 8),
+          ],
 
           const Spacer(),
 
