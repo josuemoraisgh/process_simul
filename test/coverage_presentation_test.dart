@@ -609,6 +609,14 @@ void main() {
     expect(find.textContaining('0 variables'), findsOneWidget);
     await tester.tap(find.byIcon(Icons.close));
     await tester.pump();
+    await tester.tap(find.text('Test Mode'));
+    await tester.pump();
+    expect(find.text('TEST MODE  ·  shared value 0'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('TEST MODE  ·  shared value 1'), findsOneWidget);
+    await tester.tap(find.text('Stop Test (1)'));
+    await tester.pump();
+    expect(find.textContaining('TEST MODE'), findsNothing);
   });
 
   testWidgets('HART screen executes CRUD dialogs, cell edit and state branches',

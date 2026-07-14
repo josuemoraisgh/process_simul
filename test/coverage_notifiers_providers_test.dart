@@ -241,7 +241,9 @@ void main() {
         modbusError: 'm',
         hartPort: 1,
         hartSerialPort: 'x',
-        modbusPort: 2);
+        modbusPort: 2,
+        modbusTestMode: true,
+        modbusTestValue: 1);
     expect((
       copied.hartServerRunning,
       copied.modbusRunning,
@@ -249,7 +251,9 @@ void main() {
       copied.modbusError,
       copied.hartPort,
       copied.hartSerialPort,
-      copied.modbusPort
+      copied.modbusPort,
+      copied.modbusTestMode,
+      copied.modbusTestValue
     ), (
       true,
       true,
@@ -257,7 +261,9 @@ void main() {
       'm',
       1,
       'x',
-      2
+      2,
+      true,
+      1
     ));
     expect(copied.copyWith().hartError, isNull);
 
@@ -448,7 +454,11 @@ void main() {
         db, SimulTf(), EquipmentCatalog(InMemoryEquipmentRepository()));
     final mb = ModbusTableNotifier(db);
     await hart.load();
-    final n = ConnectionNotifier(hart, mb);
+    final n = ConnectionNotifier(
+      hart,
+      mb,
+      modbusTestInterval: const Duration(milliseconds: 200),
+    );
     await mb.load();
     await hart.setCellValue('dev', 'x', '0003');
     n.syncHrRegister(8, 9);
@@ -478,6 +488,53 @@ void main() {
     socket.add(Uint8List.fromList([0, 6, 0, 0, 0, 6, 1, 5, 0, 3, 0xFF, 0]));
     await Future<void>.delayed(const Duration(milliseconds: 80));
     expect(responses, isNotEmpty);
+
+    n.setModbusTestMode(true);
+    n.setModbusTestMode(true);
+    expect((n.state.modbusTestMode, n.state.modbusTestValue), (true, 0));
+    for (final request in [
+      _modbusRequest(10, 3, 2, 1),
+      _modbusRequest(11, 4, 0, 1),
+      _modbusRequest(12, 1, 3, 1),
+      _modbusRequest(13, 2, 1, 1),
+    ]) {
+      socket.add(request);
+    }
+    // Master writes are ignored while the deterministic test signal owns the
+    // maps, so all configured points remain on the shared value.
+    socket.add(Uint8List.fromList([0, 18, 0, 0, 0, 6, 1, 6, 0, 2, 0, 99]));
+    socket.add(Uint8List.fromList([0, 19, 0, 0, 0, 6, 1, 5, 0, 3, 0xFF, 0]));
+    socket.add(_modbusRequest(20, 3, 2, 1));
+    socket.add(_modbusRequest(21, 1, 3, 1));
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    var frames = _modbusFrames(responses);
+    for (var transaction = 10; transaction <= 13; transaction++) {
+      expect(_modbusResponseValue(frames, transaction), 0);
+    }
+    expect(_modbusResponseValue(frames, 20), 0);
+    expect(_modbusResponseValue(frames, 21), 0);
+
+    await hart.setCellValue('dev', 'x', '0004');
+    await mb.load();
+    await Future<void>.delayed(const Duration(milliseconds: 160));
+    expect(n.state.modbusTestValue, 1);
+    for (final request in [
+      _modbusRequest(14, 3, 2, 1),
+      _modbusRequest(15, 4, 0, 1),
+      _modbusRequest(16, 1, 3, 1),
+      _modbusRequest(17, 2, 1, 1),
+    ]) {
+      socket.add(request);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    frames = _modbusFrames(responses);
+    for (var transaction = 14; transaction <= 17; transaction++) {
+      expect(_modbusResponseValue(frames, transaction), 1);
+    }
+    n.setModbusTestMode(false);
+    n.setModbusTestMode(false);
+    expect((n.state.modbusTestMode, n.state.modbusTestValue), (false, 0));
+
     await sub.cancel();
     socket.destroy();
     await n.stopModbus();
@@ -567,3 +624,26 @@ Uint8List _modbusRequest(int tx, int function, int address, int quantity) =>
       quantity >> 8,
       quantity & 0xff,
     ]);
+
+List<List<int>> _modbusFrames(List<List<int>> chunks) {
+  final bytes = chunks.expand((chunk) => chunk).toList();
+  final frames = <List<int>>[];
+  var offset = 0;
+  while (offset + 6 <= bytes.length) {
+    final length = (bytes[offset + 4] << 8) | bytes[offset + 5];
+    final end = offset + 6 + length;
+    if (end > bytes.length) break;
+    frames.add(bytes.sublist(offset, end));
+    offset = end;
+  }
+  return frames;
+}
+
+int _modbusResponseValue(List<List<int>> frames, int transaction) {
+  final frame =
+      frames.firstWhere((item) => ((item[0] << 8) | item[1]) == transaction);
+  final function = frame[7];
+  return function == 1 || function == 2
+      ? frame[9] & 1
+      : (frame[9] << 8) | frame[10];
+}

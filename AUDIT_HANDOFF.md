@@ -178,7 +178,7 @@ wiring real; nao regredir para parsing/comandos/CRUD acoplados.
 - `flutter analyze`: sem ocorrencias.
 - `git diff --check`: sem erros; somente avisos informativos LF/CRLF.
 - Suite integrada final: 179/179 aprovada.
-- Coverage: 5010/5010 linhas executaveis = 100%.
+- Coverage atual: 5083/5083 linhas executaveis = 100%.
 - 51 arquivos Dart auditados: 46 registros LCOV em 100%; 5 arquivos apenas
   declarativos, sem linhas executaveis instrumentaveis.
 - Todas as camadas e adaptadores serial, Win32 e WebView estao em 100% de
@@ -190,3 +190,6 @@ wiring real; nao regredir para parsing/comandos/CRUD acoplados.
 - Cleanup de sockets e `dispose` de servidores agora contem falhas de teardown.
 - XLSX valida ZIP antes de descompactar (entradas, expansao, razao, ZIP64 e
   criptografia), valida schema antes de mutar e importa em transacao atomica.
+- Modo de teste Modbus fica em `ConnectionNotifier.setModbusTestMode`: alterna
+  todos os mapas Modbus juntos entre 0/1 a cada segundo, restaura snapshots ao
+  parar, bloqueia refresh HART durante o teste e cancela o timer no `dispose`.

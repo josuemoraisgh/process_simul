@@ -57,7 +57,7 @@ Ele nao assume um runtime ou schema externo de skills.
 ## Ultima execucao
 
 Em 2026-07-14, todos os gates funcionais foram aprovados: analyzer limpo,
-179/179 testes e 5010/5010 linhas executaveis cobertas (100%). A auditoria
+179/179 testes e 5083/5083 linhas executaveis cobertas (100%). A auditoria
 abrange 51 arquivos Dart: 46 instrumentaveis e 5 sem linhas executaveis.
 Consulte `AUDIT_HANDOFF.md` e `docs/audit/README.md` para decisoes e riscos.
 

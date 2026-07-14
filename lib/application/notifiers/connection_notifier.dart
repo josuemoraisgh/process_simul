@@ -21,6 +21,8 @@ class ConnectionState {
   final int hartPort;
   final String hartSerialPort;
   final int modbusPort;
+  final bool modbusTestMode;
+  final int modbusTestValue;
 
   const ConnectionState({
     this.hartServerRunning = false,
@@ -30,6 +32,8 @@ class ConnectionState {
     this.hartPort = 5094,
     this.hartSerialPort = '',
     this.modbusPort = 502,
+    this.modbusTestMode = false,
+    this.modbusTestValue = 0,
   });
 
   ConnectionState copyWith({
@@ -40,6 +44,8 @@ class ConnectionState {
     int? hartPort,
     String? hartSerialPort,
     int? modbusPort,
+    bool? modbusTestMode,
+    int? modbusTestValue,
   }) =>
       ConnectionState(
         hartServerRunning: hartServerRunning ?? this.hartServerRunning,
@@ -49,6 +55,8 @@ class ConnectionState {
         hartPort: hartPort ?? this.hartPort,
         hartSerialPort: hartSerialPort ?? this.hartSerialPort,
         modbusPort: modbusPort ?? this.modbusPort,
+        modbusTestMode: modbusTestMode ?? this.modbusTestMode,
+        modbusTestValue: modbusTestValue ?? this.modbusTestValue,
       );
 }
 
@@ -95,6 +103,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final HartTransmitter _hartTransmitter;
   final HartServerFactory _hartServerFactory;
   final HartSerialFactory _hartSerialFactory;
+  final Duration _modbusTestInterval;
   void Function()? _removeModbusTableListener;
 
   HartCommServer? _hartServer;
@@ -106,14 +115,21 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final _irMap = <int, int>{}; // Input Registers    (read-only, from process)
   final _coilMap = <int, bool>{}; // Coils            (master-writable)
   final _diMap = <int, bool>{}; // Discrete Inputs    (read-only, from process)
+  Timer? _modbusTestTimer;
+  Map<int, int>? _hrBeforeTest;
+  Map<int, int>? _irBeforeTest;
+  Map<int, bool>? _coilBeforeTest;
+  Map<int, bool>? _diBeforeTest;
 
   ConnectionNotifier(this._hartTable, this._modbusTable,
       {HartTransmitter? hartTransmitter,
       HartServerFactory hartServerFactory = _defaultHartServerFactory,
-      HartSerialFactory hartSerialFactory = _defaultHartSerialFactory})
+      HartSerialFactory hartSerialFactory = _defaultHartSerialFactory,
+      Duration modbusTestInterval = const Duration(seconds: 1)})
       : _hartTransmitter = hartTransmitter ?? HartTransmitter.standard(),
         _hartServerFactory = hartServerFactory,
         _hartSerialFactory = hartSerialFactory,
+        _modbusTestInterval = modbusTestInterval,
         super(const ConnectionState()) {
     // Keep the Modbus register/bit maps in sync with the simulated process
     // values (HART table) and the configured address/formula table.
@@ -180,10 +196,14 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
         bindAddress: InternetAddress(bindHost),
         getRegister: (addr, isInput) =>
             (isInput ? _irMap[addr] : _hrMap[addr]) ?? 0,
-        setRegister: (addr, val) => _hrMap[addr] = val,
+        setRegister: (addr, val) {
+          if (!state.modbusTestMode) _hrMap[addr] = val;
+        },
         getCoil: (addr, isInput) =>
             isInput ? (_diMap[addr] ?? false) : (_coilMap[addr] ?? false),
-        setCoil: (addr, val) => _coilMap[addr] = val,
+        setCoil: (addr, val) {
+          if (!state.modbusTestMode) _coilMap[addr] = val;
+        },
       );
       await _modbusServer!.start();
       state = state.copyWith(
@@ -207,14 +227,88 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   void _onHartDataChanged() => _refreshReadOnlyPoints(_modbusTable.state);
 
   void _onModbusTableChanged(ModbusTableState mbState) {
+    if (state.modbusTestMode) {
+      _applyModbusTestValue(mbState, state.modbusTestValue);
+      return;
+    }
     _refreshReadOnlyPoints(mbState);
     _seedWritablePoints(mbState);
+  }
+
+  /// Alternates every configured Modbus point between 0 and 1. This affects
+  /// only the Modbus wire maps; HART values and persisted formulas are never
+  /// modified. Disabling the mode restores the maps captured on activation.
+  void setModbusTestMode(bool enabled) {
+    if (enabled == state.modbusTestMode) return;
+    _modbusTestTimer?.cancel();
+    _modbusTestTimer = null;
+
+    if (enabled) {
+      _hrBeforeTest = Map.of(_hrMap);
+      _irBeforeTest = Map.of(_irMap);
+      _coilBeforeTest = Map.of(_coilMap);
+      _diBeforeTest = Map.of(_diMap);
+      state = state.copyWith(modbusTestMode: true, modbusTestValue: 0);
+      _applyModbusTestValue(_modbusTable.state, 0);
+      _modbusTestTimer = Timer.periodic(_modbusTestInterval, (_) {
+        final next = state.modbusTestValue == 0 ? 1 : 0;
+        _applyModbusTestValue(_modbusTable.state, next);
+        state = state.copyWith(modbusTestMode: true, modbusTestValue: next);
+      });
+      globalLog.info('Modbus', 'Test mode enabled (1 second, shared 0/1)');
+      return;
+    }
+
+    _restoreModbusMaps();
+    state = state.copyWith(modbusTestMode: false, modbusTestValue: 0);
+    _refreshReadOnlyPoints(_modbusTable.state);
+    _seedWritablePoints(_modbusTable.state);
+    globalLog.info('Modbus', 'Test mode disabled');
+  }
+
+  void _applyModbusTestValue(ModbusTableState mbState, int value) {
+    final bit = value != 0;
+    for (final variable in mbState.data.values) {
+      final (_, _, mbPoint, address, _) = variable;
+      final wireAddress = _wireAddress(address);
+      if (wireAddress == null) continue;
+      switch (mbPoint) {
+        case 'hr':
+          _hrMap[wireAddress] = value;
+        case 'ir':
+          _irMap[wireAddress] = value;
+        case 'co':
+          _coilMap[wireAddress] = bit;
+        case 'di':
+          _diMap[wireAddress] = bit;
+      }
+    }
+  }
+
+  void _restoreModbusMaps() {
+    _hrMap
+      ..clear()
+      ..addAll(_hrBeforeTest ?? const {});
+    _irMap
+      ..clear()
+      ..addAll(_irBeforeTest ?? const {});
+    _coilMap
+      ..clear()
+      ..addAll(_coilBeforeTest ?? const {});
+    _diMap
+      ..clear()
+      ..addAll(_diBeforeTest ?? const {});
+    _hrBeforeTest = null;
+    _irBeforeTest = null;
+    _coilBeforeTest = null;
+    _diBeforeTest = null;
   }
 
   /// Pushes the current computed value of every 'ir'/'di' variable from the
   /// Modbus address table into the read-only register/bit maps. These points
   /// mirror the simulated process, so they are safe to overwrite every tick.
   void _refreshReadOnlyPoints(ModbusTableState mbState) {
+    if (state.modbusTestMode) return;
     for (final v in mbState.data.values) {
       final (_, _, mbPoint, addressStr, formula) = v;
       if (mbPoint != 'ir' && mbPoint != 'di') continue;
@@ -265,6 +359,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
 
   @override
   void dispose() {
+    _modbusTestTimer?.cancel();
     _hartTable.dataVersionNotifier.removeListener(_onHartDataChanged);
     _removeModbusTableListener?.call();
     _stopSilently(_hartServer?.stop(), 'HART TCP');

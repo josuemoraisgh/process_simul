@@ -25,6 +25,9 @@ desempenho, seguranca e manutenibilidade.
 - CRUD HART, Modbus, ENUM, BIT_ENUM e comandos.
 - Alternancia humano/hex, filtros, ordenacao, logs, camera e fullscreen 3D.
 - Importacao/exportacao XLSX e compatibilidade wire para requisicoes validas.
+- Modo de teste exclusivo do Modbus: todos os pontos HR, IR, coil e discrete
+  input alternam juntos entre 0 e 1 a cada segundo, sem alterar HART, formulas
+  ou persistencia; ao desativar, os mapas anteriores sao restaurados.
 
 ## Extensibilidade obrigatoria de equipamentos e HART
 
@@ -93,7 +96,8 @@ desempenho, seguranca e manutenibilidade.
 
 - `flutter analyze`: sem ocorrencias.
 - `flutter test --coverage`: 179/179 aprovados.
-- Cobertura de linhas instrumentadas: 5010/5010 = 100%.
+- Cobertura de linhas instrumentadas: 5083/5083 = 100% apos inclusao do modo
+  de teste Modbus.
 - 51 arquivos Dart auditados: 46 possuem linhas executaveis e estao no LCOV;
   5 contem somente constantes, enums ou contratos abstratos e nao geram `DA`.
 - Domain, application, infrastructure, data, presentation e bootstrap: 100%

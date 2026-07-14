@@ -41,6 +41,8 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
   @override
   Widget build(BuildContext context) {
     final ModbusTableState mbState = ref.watch(modbusTableProvider);
+    final testStatus = ref.watch(connectionProvider.select((connection) =>
+        (connection.modbusTestMode, connection.modbusTestValue)));
     // Read HART data reference (mutated in-place) and notifier for value ticks.
     final hartNotifier = ref.read(hartTableProvider.notifier);
     final hartData = ref.read(hartTableProvider).data;
@@ -74,6 +76,11 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
         onRemove: () => _removeVariable(context, mbState.data.entries.toList()),
         filter: _filter,
         onFilterChanged: (v) => setState(() => _filter = v),
+        testMode: testStatus.$1,
+        testValue: testStatus.$2,
+        onToggleTest: () => ref
+            .read(connectionProvider.notifier)
+            .setModbusTestMode(!testStatus.$1),
       ),
       // ── Header ──────────────────────────────────────────────────────────
       Container(
@@ -113,7 +120,9 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
 
                 // Compute live value from HART table if formula is an expression
                 String liveVal = formula;
-                if (formula.startsWith('@')) {
+                if (testStatus.$1) {
+                  liveVal = testStatus.$2.toString();
+                } else if (formula.startsWith('@')) {
                   try {
                     final result = HartTransmitter.evaluateExpr(
                         formula.substring(1), hartData);
@@ -154,6 +163,14 @@ class _ModbusTableScreenState extends ConsumerState<ModbusTableScreen> {
               '${rows.where((e) => e.value.$3 == 'hr' || e.value.$3 == 'co').length} writable',
               style:
                   const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
+          if (testStatus.$1) ...[
+            const Spacer(),
+            Text('TEST MODE  ·  shared value ${testStatus.$2}',
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.warning)),
+          ],
         ]),
       ),
     ]);
@@ -241,12 +258,18 @@ class _ModbusToolbar extends StatefulWidget {
   final VoidCallback onRemove;
   final String filter;
   final ValueChanged<String> onFilterChanged;
+  final bool testMode;
+  final int testValue;
+  final VoidCallback onToggleTest;
   const _ModbusToolbar(
       {required this.onAdd,
       required this.onEdit,
       required this.onRemove,
       required this.filter,
-      required this.onFilterChanged});
+      required this.onFilterChanged,
+      required this.testMode,
+      required this.testValue,
+      required this.onToggleTest});
 
   @override
   State<_ModbusToolbar> createState() => _ModbusToolbarState();
@@ -343,6 +366,20 @@ class _ModbusToolbarState extends State<_ModbusToolbar> {
                   label: 'Remove',
                   color: AppColors.error,
                   onTap: widget.onRemove),
+              Container(
+                width: 1,
+                height: 22,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: AppColors.borderDark,
+              ),
+              _ToolBtn(
+                icon: widget.testMode ? Icons.stop_circle : Icons.science,
+                label: widget.testMode
+                    ? 'Stop Test (${widget.testValue})'
+                    : 'Test Mode',
+                color: widget.testMode ? AppColors.warning : AppColors.accent,
+                onTap: widget.onToggleTest,
+              ),
             ],
           ),
         ),

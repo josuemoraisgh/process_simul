@@ -15,7 +15,7 @@
   loopback por padrao e `0.0.0.0` como opt-in LAN.
 - Sincronizado rename de equipamento HART/misto entre tabela HART e catalogo.
 - Garantido `dispose` de prepared statements do import XLSX tambem em falhas.
-- Validacao final ampliada: 179 testes e 5010/5010 linhas executaveis (100%).
+- Validacao final ampliada: 179 testes e 5083/5083 linhas executaveis (100%).
 - Isolados adaptadores serial, Win32 e ModelViewer/WebView para testes sem
   hardware, preservando os adapters reais em producao.
 - Corrigidos leak de timer e uso duplo de `ScrollController` no viewer/tabela.
@@ -24,3 +24,8 @@
 - Remover um comando HART padrao agora bloqueia o fallback legado ate que o
   comando seja explicitamente registrado novamente.
 - Falhas de cleanup de sockets/servidores sao contidas e registradas.
+- Adicionado modo de teste somente para Modbus: HR, IR, coils e discrete inputs
+  alternam todos no mesmo valor 0/1 a cada segundo; a tela mostra o valor atual
+  e os mapas anteriores sao restaurados ao desligar.
+- Validacao apos o modo Modbus: 179 testes e 5083/5083 linhas (100%), analyzer
+  limpo e build Windows Release aprovado.

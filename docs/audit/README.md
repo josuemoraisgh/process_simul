@@ -48,7 +48,7 @@ Data: 2026-07-14
 
 - Analyzer: limpo.
 - Suite integrada: 179/179 aprovada.
-- Cobertura total: 5010/5010 linhas executaveis, 100%.
+- Cobertura total atual: 5083/5083 linhas executaveis, 100%.
 - 51 arquivos Dart auditados; 46 instrumentados a 100% e 5 puramente
   declarativos sem linhas LCOV.
 - Domain, application, infrastructure, data, presentation e bootstrap: 100%.

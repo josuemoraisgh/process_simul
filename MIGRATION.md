@@ -63,3 +63,17 @@ LAN. Somente enderecos IP validos sao aceitos.
 O formato suportado e `.xlsx`. Chamadas de UI ou automacao que ofereciam
 `.xls` devem restringir o filtro para `.xlsx`; o formato binario antigo nunca
 foi decodificado pelo runtime. O schema valido permanece compativel.
+
+## Modo de teste Modbus
+
+Na tela Modbus, use `Test Mode`. O modo aplica o mesmo sinal 0/1 a todos os
+pontos a cada segundo e mostra o valor corrente no rodape. Ele nao altera HART,
+formulas nem SQLite. Para controle programatico:
+
+```dart
+ref.read(connectionProvider.notifier).setModbusTestMode(true);
+ref.read(connectionProvider.notifier).setModbusTestMode(false);
+```
+
+Desligar o modo restaura os mapas existentes antes do teste. Encerrar o
+provider tambem cancela o timer automaticamente.
