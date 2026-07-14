@@ -1,14 +1,25 @@
-import 'dart:ffi';
 import 'dart:io';
 
-import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'application/providers/app_providers.dart';
+import 'infrastructure/windows/webview2_environment.dart';
+
+/// Optional process-level hook used by embedders and deterministic tests.
+Future<void> Function()? applicationInitializerOverride;
 
 Future<void> main() async {
+  await bootstrapApplication(initializer: applicationInitializerOverride);
+}
+
+Future<void> bootstrapApplication({
+  bool? isWindows,
+  VoidCallback? redirectWebViewData,
+  VoidCallback? ensureBinding,
+  Future<void> Function()? initializer,
+}) async {
   // WebView2 (used by flutter_inappwebview / flutter_3d_controller) creates
   // its user-data folder next to the executable by default. When installed
   // in C:\Program Files, that folder is read-only and WebView2 fails
@@ -17,15 +28,29 @@ Future<void> main() async {
   //
   // We do NOT change Directory.current, because Flutter Windows uses it to
   // locate `data/flutter_assets/`.
-  if (!kIsWeb && Platform.isWindows) {
-    _redirectWebView2UserDataFolder();
+  if (!kIsWeb && (isWindows ?? Platform.isWindows)) {
+    (redirectWebViewData ?? redirectWebView2UserDataFolder)();
   }
 
-  WidgetsFlutterBinding.ensureInitialized();
+  (ensureBinding ?? WidgetsFlutterBinding.ensureInitialized)();
+
+  await (initializer ?? initializeApplication)();
+}
+
+/// Initializes application services and hands the root widget to [runner].
+/// Optional injection keeps startup fully testable without touching the real
+/// documents database or installing a global Flutter view.
+Future<void> initializeApplication({
+  ProviderContainer? providerContainer,
+  ProviderContainer Function()? providerContainerFactory,
+  void Function(Widget app)? runner,
+}) async {
+  final container = providerContainer ??
+      providerContainerFactory?.call() ??
+      ProviderContainer();
+  final appRunner = runner ?? runApp;
 
   // Create a ProviderContainer to initialise services before first frame.
-  final container = ProviderContainer();
-
   // Initialise database
   await container.read(dbRepositoryProvider).init();
 
@@ -43,7 +68,7 @@ Future<void> main() async {
   // user to open the Modbus table screen first.
   container.read(modbusTableProvider.notifier).load();
 
-  runApp(
+  appRunner(
     UncontrolledProviderScope(
       container: container,
       child: const ProcessSimulApp(),
@@ -53,27 +78,19 @@ Future<void> main() async {
 
 /// Sets WEBVIEW2_USER_DATA_FOLDER for the current process via Win32
 /// SetEnvironmentVariableW so WebView2 writes its user data into LOCALAPPDATA.
-void _redirectWebView2UserDataFolder() {
+void redirectWebView2UserDataFolder({
+  Map<String, String>? environment,
+  void Function(String path)? createDirectory,
+  void Function(String name, String value)? setEnvironment,
+}) {
   try {
-    final localAppData = Platform.environment['LOCALAPPDATA'];
+    final localAppData = (environment ?? Platform.environment)['LOCALAPPDATA'];
     if (localAppData == null) return;
     final folder = '$localAppData\\process_simul\\WebView2';
-    Directory(folder).createSync(recursive: true);
-
-    final kernel32 = DynamicLibrary.open('kernel32.dll');
-    final setEnv = kernel32.lookupFunction<
-        Int32 Function(Pointer<Utf16>, Pointer<Utf16>),
-        int Function(Pointer<Utf16>, Pointer<Utf16>)>(
-      'SetEnvironmentVariableW',
-    );
-    final pName = 'WEBVIEW2_USER_DATA_FOLDER'.toNativeUtf16();
-    final pValue = folder.toNativeUtf16();
-    try {
-      setEnv(pName, pValue);
-    } finally {
-      malloc.free(pName);
-      malloc.free(pValue);
-    }
+    (createDirectory ??
+        (path) => Directory(path).createSync(recursive: true))(folder);
+    (setEnvironment ?? setWindowsEnvironmentVariable)(
+        'WEBVIEW2_USER_DATA_FOLDER', folder);
   } catch (_) {
     // Silently ignore — WebView2 will fall back to default behaviour.
   }

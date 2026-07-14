@@ -23,7 +23,14 @@ class HartTransmitter {
   }
 
   static HartCommandRegistry standardCommandRegistry() {
-    final commands = HartCommandRegistry();
+    final commands = HartCommandRegistry(
+      onUnknown: (command, context) => _processLegacy(
+        command: command,
+        requestBody: context.requestBody,
+        device: context.device,
+        onWrite: context.onWrite,
+      ),
+    );
     for (final command in _standardCommandCodes) {
       commands.register(FunctionalHartCommandHandler(
         command,

@@ -24,6 +24,15 @@ class Boiler3dViewer extends StatefulWidget {
   final bool showControls;
   final VoidCallback? onEscapePressed;
   final VoidCallback? onDoubleClick;
+  final VoidCallback? playAnimation;
+  final VoidCallback? pauseAnimation;
+  final FutureOr<void> Function(String source)? javascriptEvaluator;
+  final ValueChanged<void Function(List<dynamic> args)>? onCameraHandlerReady;
+  final Duration cameraSaveDelay;
+  final Widget Function(
+    void Function(String modelAddress) onLoad,
+    void Function(Object error) onError,
+  )? viewerBuilder;
 
   const Boiler3dViewer({
     super.key,
@@ -32,6 +41,12 @@ class Boiler3dViewer extends StatefulWidget {
     this.showControls = false,
     this.onEscapePressed,
     this.onDoubleClick,
+    this.playAnimation,
+    this.pauseAnimation,
+    this.javascriptEvaluator,
+    this.onCameraHandlerReady,
+    this.cameraSaveDelay = const Duration(milliseconds: 800),
+    this.viewerBuilder,
   });
 
   @override
@@ -83,7 +98,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
 
   void _saveCameraState(String orbit, String target, String fov) {
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 800), () async {
+    _saveTimer = Timer(widget.cameraSaveDelay, () async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kOrbitKey, orbit);
       await prefs.setString(_kTargetKey, target);
@@ -102,9 +117,9 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
   void _syncModelState() {
     final s = widget.state;
     if (s.flameOn && s.flameIntensity > 0.02) {
-      _controller.playAnimation();
+      (widget.playAnimation ?? _controller.playAnimation)();
     } else {
-      _controller.pauseAnimation();
+      (widget.pauseAnimation ?? _controller.pauseAnimation)();
     }
   }
 
@@ -117,9 +132,13 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
 
   void _injectJsHandlers() {
     final wvc = _webViewController;
-    if (wvc == null) return;
+    final evaluator = widget.javascriptEvaluator ??
+        (wvc == null
+            ? null
+            : (String source) => wvc.evaluateJavascript(source: source));
+    if (evaluator == null) return;
     // Apply tone-mapping and extra rendering attributes via JS
-    wvc.evaluateJavascript(source: '''
+    evaluator('''
       var mv = document.querySelector('model-viewer');
       if (mv) {
         mv.setAttribute('tone-mapping', 'commerce');
@@ -137,7 +156,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
       }
     ''');
     if (widget.onEscapePressed != null) {
-      wvc.evaluateJavascript(source: '''
+      evaluator('''
         document.addEventListener('keydown', function(e) {
           if (e.key === 'Escape') {
             e.preventDefault();
@@ -147,7 +166,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
       ''');
     }
     if (widget.onDoubleClick != null) {
-      wvc.evaluateJavascript(source: '''
+      evaluator('''
         document.addEventListener('dblclick', function(e) {
           e.preventDefault();
           window.flutter_inappwebview.callHandler('onDoubleClick');
@@ -156,13 +175,38 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
     }
   }
 
+  void _handleModelLoad(String modelAddress) {
+    _controller.onModelLoaded.value = true;
+    setState(() => _isLoaded = true);
+    _syncModelState();
+    _injectJsHandlers();
+  }
+
+  void _handleModelError(Object error) {
+    _controller.onModelLoaded.value = false;
+    debugPrint('Boiler3dViewer error: $error');
+  }
+
+  void _handleCameraChange(List<dynamic> args) {
+    if (args.isEmpty) return;
+    final parts = args[0].toString().split('||');
+    if (parts.length == 3) {
+      _saveCameraState(parts[0], parts[1], parts[2]);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    widget.onCameraHandlerReady?.call(_handleCameraChange);
     if (!_cameraReady) {
       return const ColoredBox(
         color: Color(0xFF1a1a2e),
         child: Center(child: CircularProgressIndicator()),
       );
+    }
+    final viewerBuilder = widget.viewerBuilder;
+    if (viewerBuilder != null) {
+      return viewerBuilder(_handleModelLoad, _handleModelError);
     }
     return ModelViewer(
       id: _id,
@@ -190,16 +234,8 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
         }
       ''',
       relatedJs: _utils.injectedJS(_id, 'flutter-3d-controller'),
-      onLoad: (modelAddress) {
-        _controller.onModelLoaded.value = true;
-        setState(() => _isLoaded = true);
-        _syncModelState();
-        _injectJsHandlers();
-      },
-      onError: (error) {
-        _controller.onModelLoaded.value = false;
-        debugPrint('Boiler3dViewer error: $error');
-      },
+      onLoad: _handleModelLoad,
+      onError: _handleModelError,
       onWebViewCreated: kIsWeb
           ? null
           : (InAppWebViewController webViewController) {
@@ -211,14 +247,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
               );
               webViewController.addJavaScriptHandler(
                 handlerName: 'onCameraChange',
-                callback: (args) {
-                  if (args.isNotEmpty) {
-                    final parts = args[0].toString().split('||');
-                    if (parts.length == 3) {
-                      _saveCameraState(parts[0], parts[1], parts[2]);
-                    }
-                  }
-                },
+                callback: _handleCameraChange,
               );
               if (widget.onEscapePressed != null) {
                 webViewController.addJavaScriptHandler(

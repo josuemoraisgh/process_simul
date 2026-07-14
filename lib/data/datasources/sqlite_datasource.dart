@@ -22,12 +22,17 @@ import 'xls_import_validator.dart';
 ///   equipment_catalog (id TEXT PK, protocols_json TEXT, profile_json TEXT,
 ///                      attributes_json TEXT)
 class SqliteDatasource {
+  SqliteDatasource({Future<Directory> Function()? documentsDirectory})
+      : _documentsDirectory =
+            documentsDirectory ?? getApplicationDocumentsDirectory;
+
+  final Future<Directory> Function() _documentsDirectory;
   late Database _db;
   bool _isOpen = false;
 
   // ── Open / init ────────────────────────────────────────────────────────────
   Future<void> open() async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await _documentsDirectory();
     final dbPath = p.join(dir.path, 'process_simul.db');
     openAt(dbPath);
   }
@@ -43,6 +48,30 @@ class SqliteDatasource {
   }
 
   Database get db => _db;
+
+  T _transaction<T>(T Function() operation, {bool immediate = false}) {
+    _db.execute(immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
+    try {
+      final result = operation();
+      _db.execute('COMMIT');
+      return result;
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  T _savepoint<T>(String name, T Function() operation) {
+    _db.execute('SAVEPOINT $name');
+    try {
+      final result = operation();
+      _db.execute('RELEASE $name');
+      return result;
+    } catch (_) {
+      _db.execute('ROLLBACK TO $name');
+      rethrow;
+    }
+  }
 
   void _onCreate() {
     _db.execute('''
@@ -120,108 +149,112 @@ class SqliteDatasource {
   }
 
   void _seed() {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       // Hart meta
       final metaStmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_meta (col_name, byte_size, type_str) VALUES (?, ?, ?)',
       );
-      for (final entry in kHartTemplate.entries) {
-        final (byteSize, typeStr, _) = entry.value;
-        metaStmt.execute([entry.key, byteSize, typeStr]);
+      try {
+        for (final entry in kHartTemplate.entries) {
+          final (byteSize, typeStr, _) = entry.value;
+          metaStmt.execute([entry.key, byteSize, typeStr]);
+        }
+      } finally {
+        metaStmt.dispose();
       }
-      metaStmt.dispose();
 
       // Hart data
       final dataStmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
       );
-      for (final entry in kHartTemplate.entries) {
-        final (_, _, values) = entry.value;
-        for (int i = 0; i < kHartDevices.length; i++) {
-          dataStmt.execute([kHartDevices[i], entry.key, values[i]]);
+      try {
+        for (final entry in kHartTemplate.entries) {
+          final (_, _, values) = entry.value;
+          for (int i = 0; i < kHartDevices.length; i++) {
+            dataStmt.execute([kHartDevices[i], entry.key, values[i]]);
+          }
         }
+      } finally {
+        dataStmt.dispose();
       }
-      dataStmt.dispose();
 
       // Modbus data
       final mbStmt = _db.prepare(
         'INSERT OR IGNORE INTO modbus_data (name, byte_size, type_str, mb_point, address, formula, raw_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
       );
-      for (final entry in kModbusTemplate.entries) {
-        final (byteSize, typeStr, mbPoint, address, formula) = entry.value;
-        mbStmt.execute(
-            [entry.key, byteSize, typeStr, mbPoint, address, formula, formula]);
+      try {
+        for (final entry in kModbusTemplate.entries) {
+          final (byteSize, typeStr, mbPoint, address, formula) = entry.value;
+          mbStmt.execute([
+            entry.key,
+            byteSize,
+            typeStr,
+            mbPoint,
+            address,
+            formula,
+            formula
+          ]);
+        }
+      } finally {
+        mbStmt.dispose();
       }
-      mbStmt.dispose();
-
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void _seedEnums() {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       final stmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_enum (enum_index, hex_key, description) VALUES (?, ?, ?)',
       );
-      for (final group in kHartEnumSeed.entries) {
-        for (final entry in group.value.entries) {
-          stmt.execute([group.key, entry.key, entry.value]);
+      try {
+        for (final group in kHartEnumSeed.entries) {
+          for (final entry in group.value.entries) {
+            stmt.execute([group.key, entry.key, entry.value]);
+          }
         }
+      } finally {
+        stmt.dispose();
       }
-      stmt.dispose();
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void _seedBitEnums() {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       final stmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_bitenum (bitenum_index, hex_mask, description) VALUES (?, ?, ?)',
       );
-      for (final group in kHartBitEnumSeed.entries) {
-        for (final entry in group.value.entries) {
-          stmt.execute([group.key, entry.key, entry.value]);
+      try {
+        for (final group in kHartBitEnumSeed.entries) {
+          for (final entry in group.value.entries) {
+            stmt.execute([group.key, entry.key, entry.value]);
+          }
         }
+      } finally {
+        stmt.dispose();
       }
-      stmt.dispose();
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void _seedCommands() {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       final stmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_commands (command, description, req_json, resp_json, write_json) VALUES (?, ?, ?, ?, ?)',
       );
-      for (final entry in kHartCommandsSeed.entries) {
-        final m = entry.value;
-        stmt.execute([
-          entry.key,
-          m['description'] as String,
-          jsonEncode(m['req']),
-          jsonEncode(m['resp']),
-          jsonEncode(m['write']),
-        ]);
+      try {
+        for (final entry in kHartCommandsSeed.entries) {
+          final m = entry.value;
+          stmt.execute([
+            entry.key,
+            m['description'] as String,
+            jsonEncode(m['req']),
+            jsonEncode(m['resp']),
+            jsonEncode(m['write']),
+          ]);
+        }
+      } finally {
+        stmt.dispose();
       }
-      stmt.dispose();
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   // ── HART meta queries ─────────────────────────────────────────────────────
@@ -289,20 +322,18 @@ class SqliteDatasource {
   // ── HART CRUD ─────────────────────────────────────────────────────────────
   void addHartDevice(
       String deviceName, Map<String, (int, String, String)> colMeta) {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       final stmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
       );
-      for (final entry in colMeta.entries) {
-        stmt.execute([deviceName, entry.key, entry.value.$3]);
+      try {
+        for (final entry in colMeta.entries) {
+          stmt.execute([deviceName, entry.key, entry.value.$3]);
+        }
+      } finally {
+        stmt.dispose();
       }
-      stmt.dispose();
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void removeHartDevice(String deviceName) {
@@ -334,8 +365,7 @@ class SqliteDatasource {
     required String attributesJson,
     required bool provisionHart,
   }) {
-    _db.execute('BEGIN IMMEDIATE');
-    try {
+    _transaction(() {
       final duplicate = _db.select(
         'SELECT 1 FROM equipment_catalog WHERE id = ? LIMIT 1',
         [id],
@@ -361,31 +391,21 @@ class SqliteDatasource {
           stmt.dispose();
         }
       }
-      _db.execute('COMMIT');
-    } catch (_) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    }, immediate: true);
   }
 
   void removeEquipmentDefinition(String id, {required bool removeHart}) {
-    _db.execute('BEGIN IMMEDIATE');
-    try {
+    _transaction(() {
       _db.execute('DELETE FROM equipment_catalog WHERE id = ?', [id]);
       if (removeHart) {
         _db.execute('DELETE FROM hart_data WHERE device = ?', [id]);
       }
-      _db.execute('COMMIT');
-    } catch (_) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    }, immediate: true);
   }
 
   void addHartColumn(String colName, int byteSize, String typeStr,
       String defaultHex, List<String> devices) {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       _db.execute(
         'INSERT OR REPLACE INTO hart_meta (col_name, byte_size, type_str) VALUES (?, ?, ?)',
         [colName, byteSize, typeStr],
@@ -393,27 +413,21 @@ class SqliteDatasource {
       final stmt = _db.prepare(
         'INSERT OR IGNORE INTO hart_data (device, col, raw_value) VALUES (?, ?, ?)',
       );
-      for (final dev in devices) {
-        stmt.execute([dev, colName, defaultHex]);
+      try {
+        for (final dev in devices) {
+          stmt.execute([dev, colName, defaultHex]);
+        }
+      } finally {
+        stmt.dispose();
       }
-      stmt.dispose();
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void removeHartColumn(String colName) {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       _db.execute('DELETE FROM hart_meta WHERE col_name=?', [colName]);
       _db.execute('DELETE FROM hart_data WHERE col=?', [colName]);
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   List<String> getHartDevices() {
@@ -422,8 +436,7 @@ class SqliteDatasource {
   }
 
   void renameHartDevice(String oldName, String newName) {
-    _db.execute('BEGIN IMMEDIATE');
-    try {
+    _transaction(() {
       _db.execute(
         'UPDATE equipment_catalog SET id=? WHERE id=?',
         [newName, oldName],
@@ -432,17 +445,12 @@ class SqliteDatasource {
         'UPDATE hart_data SET device=? WHERE device=?',
         [newName, oldName],
       );
-      _db.execute('COMMIT');
-    } catch (_) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    }, immediate: true);
   }
 
   void editHartColumn(String oldColName, String newColName, int byteSize,
       String typeStr, String defaultHex) {
-    _db.execute('BEGIN');
-    try {
+    _transaction(() {
       _db.execute(
         'UPDATE hart_meta SET col_name=?, byte_size=?, type_str=? WHERE col_name=?',
         [newColName, byteSize, typeStr, oldColName],
@@ -455,11 +463,7 @@ class SqliteDatasource {
         _db.execute('UPDATE hart_data SET raw_value=? WHERE col=?',
             [defaultHex, newColName]);
       }
-      _db.execute('COMMIT');
-    } catch (e) {
-      _db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   void editModbusVariable(String oldName, String newName, int byteSize,
@@ -678,9 +682,11 @@ class SqliteDatasource {
   /// Imports HART and Modbus data from an XLSX file.
   /// Returns the number of rows imported.
   int importFromXls(String sourcePath) {
+    XlsImportValidator.validateSourcePath(sourcePath);
     final source = File(sourcePath);
     XlsImportValidator.validateFileSize(source.lengthSync());
     final bytes = source.readAsBytesSync();
+    XlsImportValidator.validateXlsxArchive(bytes);
     final excel = Excel.decodeBytes(bytes);
     XlsImportValidator.validate(excel);
     int count = 0;
@@ -710,8 +716,7 @@ class SqliteDatasource {
             }
           }
 
-          _db.execute('SAVEPOINT import_hart');
-          try {
+          _savepoint('import_hart', () {
             _db.execute('DELETE FROM hart_meta');
             _db.execute('DELETE FROM hart_data');
 
@@ -754,11 +759,7 @@ class SqliteDatasource {
             } finally {
               metaStmt.dispose();
             }
-            _db.execute('RELEASE import_hart');
-          } catch (e) {
-            _db.execute('ROLLBACK TO import_hart');
-            rethrow;
-          }
+          });
         }
       }
 
@@ -781,8 +782,7 @@ class SqliteDatasource {
         if (fi < 0) fi = col('CLP100');
 
         if (ni >= 0) {
-          _db.execute('SAVEPOINT import_modbus');
-          try {
+          _savepoint('import_modbus', () {
             _db.execute('DELETE FROM modbus_data');
             final stmt = _db.prepare(
               'INSERT OR REPLACE INTO modbus_data (name, byte_size, type_str, mb_point, address, formula, raw_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -815,19 +815,14 @@ class SqliteDatasource {
             } finally {
               stmt.dispose();
             }
-            _db.execute('RELEASE import_modbus');
-          } catch (e) {
-            _db.execute('ROLLBACK TO import_modbus');
-            rethrow;
-          }
+          });
         }
       }
 
       // ── ENUM sheet (optional) ───────────────────────────────────────────
       final enumSheet = excel.tables['ENUM'];
       if (enumSheet != null && enumSheet.rows.length > 1) {
-        _db.execute('SAVEPOINT import_enum');
-        try {
+        _savepoint('import_enum', () {
           _db.execute('DELETE FROM hart_enum');
           final stmt = _db.prepare(
             'INSERT OR REPLACE INTO hart_enum (enum_index, hex_key, description) VALUES (?, ?, ?)',
@@ -847,18 +842,13 @@ class SqliteDatasource {
           } finally {
             stmt.dispose();
           }
-          _db.execute('RELEASE import_enum');
-        } catch (e) {
-          _db.execute('ROLLBACK TO import_enum');
-          rethrow;
-        }
+        });
       }
 
       // ── BIT_ENUM sheet (optional) ───────────────────────────────────────
       final bitSheet = excel.tables['BIT_ENUM'];
       if (bitSheet != null && bitSheet.rows.length > 1) {
-        _db.execute('SAVEPOINT import_bitenum');
-        try {
+        _savepoint('import_bitenum', () {
           _db.execute('DELETE FROM hart_bitenum');
           final stmt = _db.prepare(
             'INSERT OR REPLACE INTO hart_bitenum (bitenum_index, hex_mask, description) VALUES (?, ?, ?)',
@@ -875,18 +865,13 @@ class SqliteDatasource {
           } finally {
             stmt.dispose();
           }
-          _db.execute('RELEASE import_bitenum');
-        } catch (e) {
-          _db.execute('ROLLBACK TO import_bitenum');
-          rethrow;
-        }
+        });
       }
 
       // ── COMMANDS sheet (optional) ───────────────────────────────────────
       final cmdSheet = excel.tables['COMMANDS'];
       if (cmdSheet != null && cmdSheet.rows.length > 1) {
-        _db.execute('SAVEPOINT import_commands');
-        try {
+        _savepoint('import_commands', () {
           _db.execute('DELETE FROM hart_commands');
           final stmt = _db.prepare(
             'INSERT OR REPLACE INTO hart_commands (command, description, req_json, resp_json, write_json) VALUES (?, ?, ?, ?, ?)',
@@ -908,11 +893,7 @@ class SqliteDatasource {
           } finally {
             stmt.dispose();
           }
-          _db.execute('RELEASE import_commands');
-        } catch (e) {
-          _db.execute('ROLLBACK TO import_commands');
-          rethrow;
-        }
+        });
       }
 
       _db.execute('COMMIT');

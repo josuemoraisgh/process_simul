@@ -88,14 +88,6 @@ class _HartToolbarState extends ConsumerState<_HartToolbar> {
   final _filterCtrl = TextEditingController();
 
   @override
-  void didUpdateWidget(covariant _HartToolbar old) {
-    super.didUpdateWidget(old);
-    if (widget.filter != _filterCtrl.text) {
-      _filterCtrl.text = widget.filter;
-    }
-  }
-
-  @override
   void dispose() {
     _filterCtrl.dispose();
     super.dispose();
@@ -351,7 +343,8 @@ class _HartTableState extends ConsumerState<_HartTable> {
   static const double _devW = 110.0;
   static const double _headH = 36.0;
 
-  final _vCtrl = ScrollController();
+  final _vNamesCtrl = ScrollController();
+  final _vBodyCtrl = ScrollController();
   final _hHeadCtrl = ScrollController();
   final _hBodyCtrl = ScrollController();
   bool _syncing = false;
@@ -361,6 +354,8 @@ class _HartTableState extends ConsumerState<_HartTable> {
     super.initState();
     _hHeadCtrl.addListener(_syncHeadToBody);
     _hBodyCtrl.addListener(_syncBodyToHead);
+    _vNamesCtrl.addListener(_syncNamesToBody);
+    _vBodyCtrl.addListener(_syncBodyToNames);
   }
 
   void _syncHeadToBody() {
@@ -381,9 +376,28 @@ class _HartTableState extends ConsumerState<_HartTable> {
     _syncing = false;
   }
 
+  void _syncNamesToBody() {
+    if (_syncing) return;
+    _syncing = true;
+    if (_vBodyCtrl.hasClients && _vBodyCtrl.offset != _vNamesCtrl.offset) {
+      _vBodyCtrl.jumpTo(_vNamesCtrl.offset);
+    }
+    _syncing = false;
+  }
+
+  void _syncBodyToNames() {
+    if (_syncing) return;
+    _syncing = true;
+    if (_vNamesCtrl.hasClients && _vNamesCtrl.offset != _vBodyCtrl.offset) {
+      _vNamesCtrl.jumpTo(_vBodyCtrl.offset);
+    }
+    _syncing = false;
+  }
+
   @override
   void dispose() {
-    _vCtrl.dispose();
+    _vNamesCtrl.dispose();
+    _vBodyCtrl.dispose();
     _hHeadCtrl.dispose();
     _hBodyCtrl.dispose();
     super.dispose();
@@ -465,7 +479,7 @@ class _HartTableState extends ConsumerState<_HartTable> {
           SizedBox(
             width: _devW,
             child: ListView.builder(
-              controller: _vCtrl,
+              controller: _vNamesCtrl,
               itemCount: devices.length,
               itemExtent: _rowH,
               itemBuilder: (_, i) => _DeviceNameCell(
@@ -489,13 +503,13 @@ class _HartTableState extends ConsumerState<_HartTable> {
                 child: SizedBox(
                   width: bodyW,
                   child: Scrollbar(
-                    controller: _vCtrl,
+                    controller: _vBodyCtrl,
                     thumbVisibility: true,
                     child: Consumer(builder: (ctx, ref, _) {
                       final state = ref.watch(hartTableProvider);
                       final notifier = ref.read(hartTableProvider.notifier);
                       return ListView.builder(
-                        controller: _vCtrl,
+                        controller: _vBodyCtrl,
                         itemCount: devices.length,
                         itemExtent: _rowH,
                         itemBuilder: (_, i) {

@@ -35,6 +35,10 @@ abstract interface class HartCommandHandler {
 }
 
 typedef HartCommandExecutor = List<int> Function(HartCommandContext context);
+typedef HartUnknownCommandExecutor = List<int> Function(
+  int command,
+  HartCommandContext context,
+);
 
 final class FunctionalHartCommandHandler implements HartCommandHandler {
   const FunctionalHartCommandHandler(this.command, this._execute);
@@ -100,7 +104,12 @@ final class HartFunctionRegistry {
 /// Dispatcher with no central switch. A module owns registration and can be
 /// added or removed independently at startup or in a test.
 final class HartCommandRegistry {
+  HartCommandRegistry({HartUnknownCommandExecutor? onUnknown})
+      : _onUnknown = onUnknown;
+
   final Map<int, HartCommandHandler> _handlers = {};
+  final Set<int> _removedCommands = {};
+  final HartUnknownCommandExecutor? _onUnknown;
 
   bool contains(int command) => _handlers.containsKey(command);
 
@@ -114,6 +123,7 @@ final class HartCommandRegistry {
       );
     }
     _handlers[handler.command] = handler;
+    _removedCommands.remove(handler.command);
   }
 
   HartCommandHandler remove(int command) {
@@ -121,12 +131,18 @@ final class HartCommandRegistry {
     if (removed == null) {
       throw HartRegistryException('command not registered: $command');
     }
+    // Explicit removal must not fall through to a compatibility dispatcher.
+    // This tombstone is cleared if the command is registered again.
+    _removedCommands.add(command);
     return removed;
   }
 
   List<int> dispatch(int command, HartCommandContext context) {
     final handler = _handlers[command];
-    if (handler == null) return const [64, 0];
+    if (handler == null) {
+      if (_removedCommands.contains(command)) return const [64, 0];
+      return List.unmodifiable(_onUnknown?.call(command, context) ?? [64, 0]);
+    }
     return List.unmodifiable(handler.execute(context));
   }
 }

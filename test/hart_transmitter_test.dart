@@ -26,6 +26,46 @@ ReactVar _cell(String name, String hex,
 }
 
 void main() {
+  test('removing a standard command disables legacy fallback until re-added',
+      () {
+    final transmitter = HartTransmitter.standard();
+    final device = <String, ReactVar>{
+      'error_code': _cell('error_code', '0000', size: 2),
+      'process_variable_unit_code': _cell('process_variable_unit_code', '2A'),
+      'PROCESS_VARIABLE': _cell(
+        'PROCESS_VARIABLE',
+        '3FC00000',
+        type: 'FLOAT',
+        size: 4,
+      ),
+    };
+
+    transmitter.removeCommand(0x01);
+    expect(
+      transmitter.processCommand(
+        command: 0x01,
+        requestBody: const [],
+        device: device,
+        onWrite: (_, __) {},
+      ),
+      [64, 0],
+    );
+
+    transmitter.registerCommand(FunctionalHartCommandHandler(
+      0x01,
+      (_) => const [0, 0, 0xAA],
+    ));
+    expect(
+      transmitter.processCommand(
+        command: 0x01,
+        requestBody: const [],
+        device: device,
+        onWrite: (_, __) {},
+      ),
+      [0, 0, 0xAA],
+    );
+  });
+
   group('HartTransmitter.evaluateExpr characterization', () {
     late Map<String, Map<String, ReactVar>> devices;
 

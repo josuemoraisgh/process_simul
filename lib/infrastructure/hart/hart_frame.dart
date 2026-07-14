@@ -189,11 +189,6 @@ class HartFrameDecoder {
       if (_buffer.length < headerEnd) break;
       final byteCount = _buffer[headerEnd - 1];
       final totalLength = headerEnd + byteCount + 1;
-      if (totalLength > HartFrame.maxFrameLength) {
-        _buffer.clear();
-        _overflowed = true;
-        break;
-      }
       if (_buffer.length < totalLength) break;
 
       final bytes = Uint8List.fromList(_buffer.sublist(0, totalLength));

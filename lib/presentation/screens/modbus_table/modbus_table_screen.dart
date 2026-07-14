@@ -256,14 +256,6 @@ class _ModbusToolbarState extends State<_ModbusToolbar> {
   final _filterCtrl = TextEditingController();
 
   @override
-  void didUpdateWidget(covariant _ModbusToolbar old) {
-    super.didUpdateWidget(old);
-    if (widget.filter != _filterCtrl.text) {
-      _filterCtrl.text = widget.filter;
-    }
-  }
-
-  @override
   void dispose() {
     _filterCtrl.dispose();
     super.dispose();

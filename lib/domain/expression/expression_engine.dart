@@ -380,11 +380,8 @@ final class _Parser {
 
   _ExpressionNode _parsePrimary() {
     if (_match(_TokenType.number)) {
-      final value = double.tryParse(_previous.lexeme);
-      if (value == null) {
-        throw ExpressionException('invalid number', offset: _previous.offset);
-      }
-      return _NumberNode(value);
+      // The lexer only emits syntactically valid number tokens.
+      return _NumberNode(double.parse(_previous.lexeme));
     }
     if (_match(_TokenType.identifier)) {
       final name = _previous.lexeme;

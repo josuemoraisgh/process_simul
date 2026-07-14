@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import '../../application/notifiers/log_notifier.dart';
+import '../network/socket_error_guard.dart';
 
 class _ModbusRequestException implements Exception {
   final int code;
@@ -117,13 +118,12 @@ class ModbusTcpServer {
           socket.destroy();
         } catch (_) {}
       },
-      onError: (e) {
-        _clients.remove(socket);
-        globalLog.warning('Modbus', 'Client error ($addr): $e');
-        try {
-          socket.destroy();
-        } catch (_) {}
-      },
+      onError: SocketErrorGuard(
+        channel: 'Modbus',
+        address: addr,
+        socket: socket,
+        clients: _clients,
+      ).call,
       cancelOnError: true,
     );
   }

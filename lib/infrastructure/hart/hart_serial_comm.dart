@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'package:flutter_libserialport/flutter_libserialport.dart'
+    show SerialPort;
 import '../../domain/entities/react_var.dart';
 import '../../application/notifiers/log_notifier.dart';
 import 'hart_frame.dart';
 import 'hart_transmitter.dart';
+import 'hart_serial_channel.dart';
+
+export 'hart_serial_channel.dart';
 
 typedef HartTableGetter = Map<String, Map<String, ReactVar>> Function();
 typedef HartCellWriter = void Function(
@@ -19,9 +23,10 @@ class HartSerialServer {
   final HartTableGetter getTable;
   final HartCellWriter writeCell;
   final HartTransmitter transmitter;
+  final HartSerialChannelFactory channelFactory;
+  final Duration nativeSettleDelay;
 
-  SerialPort? _port;
-  SerialPortReader? _reader;
+  HartSerialChannel? _port;
   StreamSubscription<Uint8List>? _sub;
   bool _running = false;
   final HartFrameDecoder _decoder = HartFrameDecoder();
@@ -31,6 +36,8 @@ class HartSerialServer {
     required this.getTable,
     required this.writeCell,
     HartTransmitter? transmitter,
+    this.channelFactory = NativeHartSerialChannel.new,
+    this.nativeSettleDelay = const Duration(milliseconds: 50),
   }) : transmitter = transmitter ?? HartTransmitter.standard();
 
   bool get isRunning => _running;
@@ -46,11 +53,11 @@ class HartSerialServer {
       osPortName = r'\\.\' + portName;
     }
 
-    _port = SerialPort(osPortName);
+    _port = channelFactory(osPortName);
 
     // Open for read+write
     if (!_port!.openReadWrite()) {
-      final err = SerialPort.lastError?.message ?? 'Unknown error';
+      final err = _port!.lastError;
       globalLog.error(
           'HART-Serial', 'Cannot open $portName ($osPortName): $err');
       _port?.dispose();
@@ -58,18 +65,9 @@ class HartSerialServer {
       throw Exception('Cannot open $portName: $err');
     }
 
-    // Configure: 1200 baud, 8-O-1 (HART standard)
-    final config = SerialPortConfig()
-      ..baudRate = 1200
-      ..bits = 8
-      ..parity = SerialPortParity.odd
-      ..stopBits = 1
-      ..setFlowControl(SerialPortFlowControl.none);
-    _port!.config = config;
-    config.dispose();
-
-    _reader = SerialPortReader(_port!);
-    _sub = _reader!.stream.listen(
+    _port!.configureHart();
+    _running = true;
+    _sub = _port!.input.listen(
       (data) {
         if (!_running) return;
         final frames = _decoder.add(data);
@@ -88,7 +86,6 @@ class HartSerialServer {
       },
     );
 
-    _running = true;
     globalLog.info('HART-Serial', 'Listening on $portName (1200 baud, 8-O-1)');
   }
 
@@ -107,18 +104,18 @@ class HartSerialServer {
     // 2. Close reader — must happen AFTER cancel and BEFORE port close.
     //    SerialPortReader.close() can crash if the port is already closed,
     //    so we wrap it and give time for native cleanup.
-    final reader = _reader;
-    _reader = null;
-    if (reader != null) {
+    final port = _port;
+    if (port != null) {
       try {
-        reader.close();
+        port.closeReader();
       } catch (_) {}
       // Allow native event loop to settle before closing the port.
-      await Future.delayed(const Duration(milliseconds: 50));
+      if (nativeSettleDelay > Duration.zero) {
+        await Future.delayed(nativeSettleDelay);
+      }
     }
 
     // 3. Close and dispose the port.
-    final port = _port;
     _port = null;
     if (port != null) {
       try {
@@ -213,9 +210,6 @@ class HartSerialServer {
       final diBytes = <int>[];
       for (int i = 0; i + 1 < diHex.length; i += 2) {
         diBytes.add(int.parse(diHex.substring(i, i + 2), radix: 16));
-      }
-      while (diBytes.length < 3) {
-        diBytes.add(0);
       }
       return [
         (reqAddrBytes[0] & 0xC0) | (mfg & 0x3F),

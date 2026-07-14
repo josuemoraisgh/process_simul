@@ -4,6 +4,7 @@ import '../../domain/entities/react_var.dart';
 import '../../application/notifiers/log_notifier.dart';
 import 'hart_frame.dart';
 import 'hart_transmitter.dart';
+import '../network/socket_error_guard.dart';
 
 typedef HartTableGetter = Map<String, Map<String, ReactVar>> Function();
 typedef HartCellWriter = void Function(
@@ -97,13 +98,12 @@ class HartCommServer {
           socket.destroy();
         } catch (_) {}
       },
-      onError: (e) {
-        _clients.remove(socket);
-        globalLog.warning('HART', 'Client error ($addr): $e');
-        try {
-          socket.destroy();
-        } catch (_) {}
-      },
+      onError: SocketErrorGuard(
+        channel: 'HART',
+        address: addr,
+        socket: socket,
+        clients: _clients,
+      ).call,
       cancelOnError: true,
     );
   }

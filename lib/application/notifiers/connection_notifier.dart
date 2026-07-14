@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,11 +54,47 @@ class ConnectionState {
 
 typedef TableGetter = Map<String, Map<String, ReactVar>> Function();
 typedef CellWriter = void Function(String device, String col, String hex);
+typedef HartServerFactory = HartCommServer Function(
+    int port,
+    InternetAddress address,
+    TableGetter getTable,
+    CellWriter writeCell,
+    HartTransmitter transmitter);
+typedef HartSerialFactory = HartSerialServer Function(String portName,
+    TableGetter getTable, CellWriter writeCell, HartTransmitter transmitter);
+
+HartCommServer _defaultHartServerFactory(
+        int port,
+        InternetAddress address,
+        TableGetter getTable,
+        CellWriter writeCell,
+        HartTransmitter transmitter) =>
+    HartCommServer(
+      port: port,
+      bindAddress: address,
+      getTable: getTable,
+      writeCell: writeCell,
+      transmitter: transmitter,
+    );
+
+HartSerialServer _defaultHartSerialFactory(
+        String portName,
+        TableGetter getTable,
+        CellWriter writeCell,
+        HartTransmitter transmitter) =>
+    HartSerialServer(
+      portName: portName,
+      getTable: getTable,
+      writeCell: writeCell,
+      transmitter: transmitter,
+    );
 
 class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final HartTableNotifier _hartTable;
   final ModbusTableNotifier _modbusTable;
   final HartTransmitter _hartTransmitter;
+  final HartServerFactory _hartServerFactory;
+  final HartSerialFactory _hartSerialFactory;
   void Function()? _removeModbusTableListener;
 
   HartCommServer? _hartServer;
@@ -71,8 +108,12 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   final _diMap = <int, bool>{}; // Discrete Inputs    (read-only, from process)
 
   ConnectionNotifier(this._hartTable, this._modbusTable,
-      {HartTransmitter? hartTransmitter})
+      {HartTransmitter? hartTransmitter,
+      HartServerFactory hartServerFactory = _defaultHartServerFactory,
+      HartSerialFactory hartSerialFactory = _defaultHartSerialFactory})
       : _hartTransmitter = hartTransmitter ?? HartTransmitter.standard(),
+        _hartServerFactory = hartServerFactory,
+        _hartSerialFactory = hartSerialFactory,
         super(const ConnectionState()) {
     // Keep the Modbus register/bit maps in sync with the simulated process
     // values (HART table) and the configured address/formula table.
@@ -87,13 +128,8 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       {String bindHost = '127.0.0.1'}) async {
     await stopHartServer();
     try {
-      _hartServer = HartCommServer(
-        port: port,
-        bindAddress: InternetAddress(bindHost),
-        getTable: getTable,
-        writeCell: writeCell,
-        transmitter: _hartTransmitter,
-      );
+      _hartServer = _hartServerFactory(port, InternetAddress(bindHost),
+          getTable, writeCell, _hartTransmitter);
       await _hartServer!.start();
       state = state.copyWith(
           hartServerRunning: true, hartError: null, hartPort: port);
@@ -124,12 +160,8 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       String portName, TableGetter getTable, CellWriter writeCell) async {
     await stopHartServer();
     try {
-      _hartSerial = HartSerialServer(
-        portName: portName,
-        getTable: getTable,
-        writeCell: writeCell,
-        transmitter: _hartTransmitter,
-      );
+      _hartSerial =
+          _hartSerialFactory(portName, getTable, writeCell, _hartTransmitter);
       await _hartSerial!.start();
       state = state.copyWith(
           hartServerRunning: true, hartError: null, hartSerialPort: portName);
@@ -235,9 +267,16 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   void dispose() {
     _hartTable.dataVersionNotifier.removeListener(_onHartDataChanged);
     _removeModbusTableListener?.call();
-    _hartServer?.stop();
-    _hartSerial?.stop();
-    _modbusServer?.stop();
+    _stopSilently(_hartServer?.stop(), 'HART TCP');
+    _stopSilently(_hartSerial?.stop(), 'HART serial');
+    _stopSilently(_modbusServer?.stop(), 'Modbus TCP');
     super.dispose();
+  }
+
+  void _stopSilently(Future<void>? operation, String service) {
+    if (operation == null) return;
+    unawaited(operation.catchError((Object error, StackTrace stackTrace) {
+      globalLog.warning('CONNECTION', 'Failed to stop $service: $error');
+    }));
   }
 }

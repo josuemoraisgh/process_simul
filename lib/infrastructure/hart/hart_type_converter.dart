@@ -3,9 +3,7 @@ import 'dart:math' as math;
 
 /// Converts between hex strings and human-readable engineering values,
 /// mirroring the Python hrt_type.py implementation.
-class HartTypeConverter {
-  HartTypeConverter._();
-
+abstract final class HartTypeConverter {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Hex → engineering/human value as a [String].
@@ -227,12 +225,9 @@ class HartTypeConverter {
       } else {
         sixBit |= 0x40;
       }
-      final ch = sixBit & 0x7F;
-      if (ch >= 0x20 && ch <= 0x7E) {
-        chars.add(String.fromCharCode(ch));
-      } else {
-        chars.add(' ');
-      }
+      // The six-bit transform above always produces printable ASCII:
+      // 0x20..0x3F or 0x40..0x5F.
+      chars.add(String.fromCharCode(sixBit & 0x7F));
     }
     return chars.join().trimRight();
   }
@@ -262,9 +257,6 @@ class HartTypeConverter {
       }
     }
     if (accBits > 0) out.add((acc << (8 - accBits)) & 0xFF);
-    while (out.length < byteSize) {
-      out.add(0);
-    }
     return out
         .take(byteSize)
         .map((b) => b.toRadixString(16).padLeft(2, '0'))

@@ -84,7 +84,7 @@ class _EditCellDialogState extends State<EditCellDialog>
 
   void _submit() {
     final v = widget.variable;
-    String result;
+    var result = v.rawValue;
     switch (_tab.index) {
       case 0: // plain value
         final text = _valueCtrl.text.trim();
@@ -98,8 +98,6 @@ class _EditCellDialogState extends State<EditCellDialog>
         result = '@${_funcCtrl.text.trim()}';
       case 2: // transfer function
         result = r'$' + _tfuncCtrl.text.trim();
-      default:
-        result = v.rawValue;
     }
     Navigator.of(context).pop(result);
   }

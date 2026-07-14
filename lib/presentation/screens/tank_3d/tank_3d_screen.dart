@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +10,17 @@ import 'boiler_3d_viewer.dart';
 final isFullscreenNotifier = ValueNotifier<bool>(false);
 
 class Tank3dScreen extends StatefulWidget {
-  const Tank3dScreen({super.key});
+  const Tank3dScreen({
+    super.key,
+    this.fullscreenSetter,
+    this.viewerBuilder,
+  });
+
+  final Future<void> Function(bool value)? fullscreenSetter;
+  final Widget Function(
+    VoidCallback onDoubleClick,
+    VoidCallback? onEscapePressed,
+  )? viewerBuilder;
 
   @override
   State<Tank3dScreen> createState() => _Tank3dScreenState();
@@ -18,6 +29,7 @@ class Tank3dScreen extends StatefulWidget {
 class _Tank3dScreenState extends State<Tank3dScreen> {
   bool _isFullscreen = false;
   bool _showExitButton = true;
+  Timer? _exitButtonTimer;
 
   @override
   void initState() {
@@ -27,6 +39,7 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
 
   @override
   void dispose() {
+    _exitButtonTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleKey);
     if (_isFullscreen) {
       isFullscreenNotifier.value = false;
@@ -46,6 +59,11 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
   }
 
   Future<void> _setFullscreen(bool value) async {
+    final setter = widget.fullscreenSetter;
+    if (setter != null) {
+      await setter(value);
+      return;
+    }
     if (!kIsWeb && Platform.isWindows) {
       await windowManager.ensureInitialized();
       await windowManager.setFullScreen(value);
@@ -61,11 +79,15 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
     isFullscreenNotifier.value = goFull;
     await _setFullscreen(goFull);
     if (goFull) {
-      Future.delayed(const Duration(seconds: 4), () {
+      _exitButtonTimer?.cancel();
+      _exitButtonTimer = Timer(const Duration(seconds: 4), () {
         if (mounted && _showExitButton) {
           setState(() => _showExitButton = false);
         }
       });
+    } else {
+      _exitButtonTimer?.cancel();
+      _exitButtonTimer = null;
     }
   }
 
@@ -131,10 +153,14 @@ class _Tank3dScreenState extends State<Tank3dScreen> {
                 ),
               // 3D Canvas
               Expanded(
-                child: Boiler3dViewer(
-                  onEscapePressed: _isFullscreen ? _toggleFullscreen : null,
-                  onDoubleClick: _toggleFullscreen,
-                ),
+                child: widget.viewerBuilder?.call(
+                      _toggleFullscreen,
+                      _isFullscreen ? _toggleFullscreen : null,
+                    ) ??
+                    Boiler3dViewer(
+                      onEscapePressed: _isFullscreen ? _toggleFullscreen : null,
+                      onDoubleClick: _toggleFullscreen,
+                    ),
               ),
             ],
           ),

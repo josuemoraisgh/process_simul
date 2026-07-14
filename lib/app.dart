@@ -9,39 +9,52 @@ import 'presentation/screens/modbus_table/modbus_table_screen.dart';
 import 'presentation/screens/settings/settings_screen.dart';
 import 'presentation/screens/logs/logs_screen.dart';
 
-final _router = GoRouter(
-  initialLocation: '/tank3d',
-  routes: [
-    ShellRoute(
-      builder: (context, state, child) => MainShell(child: child),
+typedef AppRouteOverrides = Map<String, WidgetBuilder>;
+
+GoRouter createAppRouter({AppRouteOverrides overrides = const {}}) => GoRouter(
+      initialLocation: '/tank3d',
       routes: [
-        GoRoute(
-          path: '/tank3d',
-          builder: (_, __) => const Tank3dScreen(),
-        ),
-        GoRoute(
-          path: '/hart',
-          builder: (_, __) => const HartTableScreen(),
-        ),
-        GoRoute(
-          path: '/modbus',
-          builder: (_, __) => const ModbusTableScreen(),
-        ),
-        GoRoute(
-          path: '/settings',
-          builder: (_, __) => const SettingsScreen(),
-        ),
-        GoRoute(
-          path: '/logs',
-          builder: (_, __) => const LogsScreen(),
+        ShellRoute(
+          builder: (context, state, child) => MainShell(child: child),
+          routes: [
+            GoRoute(
+              path: '/tank3d',
+              builder: (context, _) =>
+                  overrides['/tank3d']?.call(context) ?? const Tank3dScreen(),
+            ),
+            GoRoute(
+              path: '/hart',
+              builder: (context, _) =>
+                  overrides['/hart']?.call(context) ?? const HartTableScreen(),
+            ),
+            GoRoute(
+              path: '/modbus',
+              builder: (context, _) =>
+                  overrides['/modbus']?.call(context) ??
+                  const ModbusTableScreen(),
+            ),
+            GoRoute(
+              path: '/settings',
+              builder: (context, _) =>
+                  overrides['/settings']?.call(context) ??
+                  const SettingsScreen(),
+            ),
+            GoRoute(
+              path: '/logs',
+              builder: (context, _) =>
+                  overrides['/logs']?.call(context) ?? const LogsScreen(),
+            ),
+          ],
         ),
       ],
-    ),
-  ],
-);
+    );
+
+final _router = createAppRouter();
 
 class ProcessSimulApp extends ConsumerWidget {
-  const ProcessSimulApp({super.key});
+  const ProcessSimulApp({super.key, this.routerConfig});
+
+  final GoRouter? routerConfig;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -50,7 +63,7 @@ class ProcessSimulApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
-      routerConfig: _router,
+      routerConfig: routerConfig ?? _router,
       debugShowCheckedModeBanner: false,
     );
   }

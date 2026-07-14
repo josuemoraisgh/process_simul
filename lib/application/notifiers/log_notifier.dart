@@ -46,9 +46,9 @@ class LogNotifier extends StateNotifier<List<LogEntry>> {
         source: source,
         message: message);
     final current = state;
-    state = current is _ChunkedLogList
-        ? current.append(entry, maxLength: _maxEntries)
-        : _ChunkedLogList.from(current).append(entry, maxLength: _maxEntries);
+    // Every mutation in this notifier preserves the internal list type. Keeping
+    // a generic-list conversion here created an unreachable hot-path branch.
+    state = (current as _ChunkedLogList).append(entry, maxLength: _maxEntries);
   }
 
   void debug(String src, String msg) => _add(LogLevel.debug, src, msg);
@@ -74,14 +74,6 @@ class _ChunkedLogList extends ListBase<LogEntry> {
   _ChunkedLogList._(this._chunks, this._start, this._length);
 
   factory _ChunkedLogList.empty() => _ChunkedLogList._(const {}, 0, 0);
-
-  factory _ChunkedLogList.from(Iterable<LogEntry> entries) {
-    var result = _ChunkedLogList.empty();
-    for (final entry in entries) {
-      result = result.append(entry, maxLength: 0x7FFFFFFF);
-    }
-    return result;
-  }
 
   _ChunkedLogList append(LogEntry entry, {required int maxLength}) {
     final absoluteEnd = _start + _length;

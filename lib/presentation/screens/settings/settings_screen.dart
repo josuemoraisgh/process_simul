@@ -9,7 +9,23 @@ import '../../../domain/enums/db_model.dart';
 import '../../dialogs/custom_type_dialogs.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
-  const SettingsScreen({super.key});
+  final Future<List<String>> Function()? enumeratePorts;
+  final Future<String?> Function()? pickImportPath;
+  final Future<String?> Function()? pickExportPath;
+  final Future<int> Function(String path)? importXls;
+  final Future<void> Function(String path)? exportXls;
+  final Future<ProcessResult> Function(String executable, List<String> args)?
+      runProcess;
+
+  const SettingsScreen({
+    super.key,
+    this.enumeratePorts,
+    this.pickImportPath,
+    this.pickExportPath,
+    this.importXls,
+    this.exportXls,
+    this.runProcess,
+  });
 
   @override
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
@@ -69,9 +85,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<List<String>> _enumeratePorts() async {
+    if (widget.enumeratePorts != null) return widget.enumeratePorts!();
     if (!Platform.isWindows) return [];
     try {
-      final result = await Process.run('powershell', [
+      final result = await (widget.runProcess ?? Process.run)('powershell', [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
@@ -106,27 +123,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // ── Import from XLS ──────────────────────────────────────────────────────
   Future<void> _importXls() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx', 'xls'],
-      dialogTitle: 'Selecione o arquivo XLSX para importar',
-    );
-    if (result == null || result.files.single.path == null) return;
-    final path = result.files.single.path!;
+    final String? path;
+    if (widget.pickImportPath != null) {
+      path = await widget.pickImportPath!();
+    } else {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        dialogTitle: 'Selecione o arquivo XLSX para importar',
+      );
+      path = result?.files.single.path;
+    }
+    if (path == null) return;
+    final selectedPath = path;
 
     setState(() {
       _importing = true;
       _importResult = null;
     });
     try {
-      final repo = ref.read(dbRepositoryProvider);
-      final count = await repo.importFromXls(path);
+      final count = widget.importXls != null
+          ? await widget.importXls!(selectedPath)
+          : await ref.read(dbRepositoryProvider).importFromXls(selectedPath);
       await ref.read(hartTableProvider.notifier).load();
       await ref.read(modbusTableProvider.notifier).load();
       ref.read(customTypesProvider.notifier).load();
       if (!mounted) return;
-      setState(() =>
-          _importResult = 'Importado $count linhas de ${_baseName(path)}');
+      setState(() => _importResult =
+          'Importado $count linhas de ${_baseName(selectedPath)}');
     } catch (e) {
       if (!mounted) return;
       setState(() => _importResult = 'Falha na importação: $e');
@@ -137,16 +161,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // ── Export to XLS ──────────────────────────────────────────────────────────
   Future<void> _exportXls() async {
-    final outPath = await FilePicker.platform.saveFile(
-      dialogTitle: 'Salvar XLSX',
-      fileName: 'process_simul_export.xlsx',
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
+    final outPath = widget.pickExportPath != null
+        ? await widget.pickExportPath!()
+        : await FilePicker.platform.saveFile(
+            dialogTitle: 'Salvar XLSX',
+            fileName: 'process_simul_export.xlsx',
+            type: FileType.custom,
+            allowedExtensions: ['xlsx'],
+          );
     if (outPath == null) return;
     try {
-      final repo = ref.read(dbRepositoryProvider);
-      await repo.exportToXls(outPath);
+      if (widget.exportXls != null) {
+        await widget.exportXls!(outPath);
+      } else {
+        await ref.read(dbRepositoryProvider).exportToXls(outPath);
+      }
       if (!mounted) return;
       setState(() => _importResult = 'Exportado para ${_baseName(outPath)}');
     } catch (e) {
@@ -309,7 +338,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 12),
-                Row(children: [
+                Wrap(spacing: 12, runSpacing: 8, children: [
                   ElevatedButton.icon(
                     icon: _importing
                         ? const SizedBox(
@@ -327,7 +356,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           horizontal: 16, vertical: 12),
                     ),
                   ),
-                  const SizedBox(width: 12),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.download, size: 16),
                     label: const Text('Exportar para .xlsx'),
@@ -436,6 +464,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     if (tfStep == null || !AppSettings.isValidTfStep(tfStep)) {
       _showValidationError('TF step must be between 10 and 5000 ms');
+      return;
+    }
+    if (!AppSettings.isValidBindAddress(_tcpHostCtrl.text)) {
+      _showValidationError('Server bind address must be a valid IP address');
       return;
     }
     final s = ref.read(settingsProvider);

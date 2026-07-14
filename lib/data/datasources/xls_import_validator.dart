@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 
@@ -23,6 +24,9 @@ class XlsImportValidator {
   static const int maxColumnsPerSheet = 512;
   static const int maxTotalCells = 500000;
   static const int maxCellCharacters = 4096;
+  static const int maxArchiveEntries = 2048;
+  static const int maxExpandedBytes = 64 * 1024 * 1024;
+  static const int maxCompressionRatio = 200;
 
   static final RegExp _identifier = RegExp(r'^[A-Za-z0-9_. -]{1,128}$');
   static final RegExp _hex = RegExp(r'^[0-9A-Fa-f]+$');
@@ -46,6 +50,95 @@ class XlsImportValidator {
       );
     }
   }
+
+  static void validateSourcePath(String sourcePath) {
+    if (!sourcePath.toLowerCase().endsWith('.xlsx')) {
+      throw const XlsImportException('only .xlsx workbooks are supported');
+    }
+  }
+
+  /// Validates the XLSX ZIP directory before any entry is decompressed.
+  ///
+  /// This rejects malformed/encrypted/ZIP64 containers and bounds both the
+  /// declared expanded size and compression ratio, preventing a small upload
+  /// from expanding without limit inside [Excel.decodeBytes].
+  static void validateXlsxArchive(List<int> bytes) {
+    validateFileSize(bytes.length);
+    if (bytes.length < 22) {
+      throw const XlsImportException('file is not a valid XLSX ZIP archive');
+    }
+    final data = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    final eocd = _findEndOfCentralDirectory(data);
+    if (eocd < 0 || eocd + 22 > data.length) {
+      throw const XlsImportException('file is not a valid XLSX ZIP archive');
+    }
+
+    final disk = _u16(data, eocd + 4);
+    final directoryDisk = _u16(data, eocd + 6);
+    final diskEntries = _u16(data, eocd + 8);
+    final entries = _u16(data, eocd + 10);
+    final directorySize = _u32(data, eocd + 12);
+    final directoryOffset = _u32(data, eocd + 16);
+    final commentLength = _u16(data, eocd + 20);
+    if (disk != 0 ||
+        directoryDisk != 0 ||
+        diskEntries != entries ||
+        entries == 0 ||
+        entries > maxArchiveEntries ||
+        eocd + 22 + commentLength != data.length ||
+        directoryOffset + directorySize > eocd) {
+      throw const XlsImportException('XLSX archive directory exceeds limits');
+    }
+
+    var offset = directoryOffset;
+    var expandedBytes = 0;
+    var compressedBytes = 0;
+    for (var index = 0; index < entries; index++) {
+      if (offset + 46 > data.length || _u32(data, offset) != 0x02014b50) {
+        throw const XlsImportException('XLSX central directory is malformed');
+      }
+      final flags = _u16(data, offset + 8);
+      final compressed = _u32(data, offset + 20);
+      final expanded = _u32(data, offset + 24);
+      if ((flags & 0x1) != 0 ||
+          compressed == 0xffffffff ||
+          expanded == 0xffffffff) {
+        throw const XlsImportException(
+            'encrypted or ZIP64 XLSX is unsupported');
+      }
+      expandedBytes += expanded;
+      compressedBytes += compressed;
+      if (expandedBytes > maxExpandedBytes ||
+          (compressedBytes == 0
+              ? expandedBytes > 0
+              : expandedBytes > compressedBytes * maxCompressionRatio)) {
+        throw const XlsImportException('XLSX expanded content exceeds limits');
+      }
+      offset += 46 +
+          _u16(data, offset + 28) +
+          _u16(data, offset + 30) +
+          _u16(data, offset + 32);
+    }
+    if (offset > directoryOffset + directorySize) {
+      throw const XlsImportException('XLSX central directory is malformed');
+    }
+  }
+
+  static int _findEndOfCentralDirectory(Uint8List data) {
+    final first = data.length > 65557 ? data.length - 65557 : 0;
+    for (var offset = data.length - 22; offset >= first; offset--) {
+      if (_u32(data, offset) == 0x06054b50) return offset;
+    }
+    return -1;
+  }
+
+  static int _u16(Uint8List data, int offset) => data.buffer
+      .asByteData(data.offsetInBytes)
+      .getUint16(offset, Endian.little);
+
+  static int _u32(Uint8List data, int offset) => data.buffer
+      .asByteData(data.offsetInBytes)
+      .getUint32(offset, Endian.little);
 
   static void validate(Excel excel) {
     var totalCells = 0;

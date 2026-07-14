@@ -23,120 +23,123 @@ class CommBarWidget extends ConsumerWidget {
         border: Border(bottom: BorderSide(color: AppColors.borderDark)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          // ── Transfer Function ──────────────────────────────────────────
-          _StatusDot(active: tfRunning),
-          const SizedBox(width: 6),
-          const Text('TF',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary)),
-          const SizedBox(width: 4),
-          Text(':${settings.tfStepMs}ms',
-              style:
-                  const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
-          const SizedBox(width: 6),
-          _SmallButton(
-            label: tfRunning ? 'Stop' : 'Start',
-            active: tfRunning,
-            onTap: () => _toggleTf(ref),
-          ),
-
-          const _VSep(),
-
-          // ── HART Server ───────────────────────────────────────────────
-          _StatusDot(active: conn.hartServerRunning),
-          const SizedBox(width: 6),
-          const Text('HART',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary)),
-          const SizedBox(width: 6),
-          _SegmentedToggle(
-            options: const ['TCP', 'Serial'],
-            selected: settings.hartMode == CommMode.tcp ? 0 : 1,
-            onChanged: (i) {
-              final mode = i == 0 ? CommMode.tcp : CommMode.serial;
-              // Stop running server before switching mode
-              if (conn.hartServerRunning) {
-                ref.read(connectionProvider.notifier).stopHartServer();
-                globalLog.info('HART', 'HART server stopped (mode change)');
-              }
-              ref
-                  .read(settingsProvider.notifier)
-                  .update((s) => s.copyWith(hartMode: mode));
-              globalLog.info('HART',
-                  'Communication mode changed to ${mode == CommMode.tcp ? 'TCP' : 'Serial'}');
-            },
-          ),
-          const SizedBox(width: 6),
-          _SmallButton(
-            label: conn.hartServerRunning ? 'Stop' : 'Start',
-            active: conn.hartServerRunning,
-            onTap: () => _toggleHart(ref, conn.hartServerRunning,
-                settings.hartServerPort, settings.hartMode,
-                bindHost: settings.hartTcpHost),
-          ),
-
-          const _VSep(),
-
-          // ── Modbus Server ─────────────────────────────────────────────
-          _StatusDot(active: conn.modbusRunning),
-          const SizedBox(width: 6),
-          const Text('Modbus',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary)),
-          const SizedBox(width: 4),
-          Text(':${conn.modbusPort}',
-              style:
-                  const TextStyle(fontSize: 11, color: AppColors.textDisabled)),
-          const SizedBox(width: 6),
-          _SmallButton(
-            label: conn.modbusRunning ? 'Stop' : 'Start',
-            active: conn.modbusRunning,
-            onTap: () => _toggleModbus(
-                ref, conn.modbusRunning, settings.modbusPort,
-                bindHost: settings.hartTcpHost),
-          ),
-
-          const _VSep(),
-
-          // ── Error banners (if any) ────────────────────────────────────
-          if (conn.hartError != null) ...[
-            const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // ── Transfer Function ──────────────────────────────────────────
+            _StatusDot(active: tfRunning),
+            const SizedBox(width: 6),
+            const Text('TF',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary)),
             const SizedBox(width: 4),
-            Text(conn.hartError!,
-                style: const TextStyle(fontSize: 11, color: AppColors.error),
-                overflow: TextOverflow.ellipsis),
-            const SizedBox(width: 8),
-          ],
-          if (conn.modbusError != null) ...[
-            const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+            Text(':${settings.tfStepMs}ms',
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textDisabled)),
+            const SizedBox(width: 6),
+            _SmallButton(
+              label: tfRunning ? 'Stop' : 'Start',
+              active: tfRunning,
+              onTap: () => _toggleTf(ref),
+            ),
+
+            const _VSep(),
+
+            // ── HART Server ───────────────────────────────────────────────
+            _StatusDot(active: conn.hartServerRunning),
+            const SizedBox(width: 6),
+            const Text('HART',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary)),
+            const SizedBox(width: 6),
+            _SegmentedToggle(
+              options: const ['TCP', 'Serial'],
+              selected: settings.hartMode == CommMode.tcp ? 0 : 1,
+              onChanged: (i) {
+                final mode = i == 0 ? CommMode.tcp : CommMode.serial;
+                // Stop running server before switching mode
+                if (conn.hartServerRunning) {
+                  ref.read(connectionProvider.notifier).stopHartServer();
+                  globalLog.info('HART', 'HART server stopped (mode change)');
+                }
+                ref
+                    .read(settingsProvider.notifier)
+                    .update((s) => s.copyWith(hartMode: mode));
+                globalLog.info('HART',
+                    'Communication mode changed to ${mode == CommMode.tcp ? 'TCP' : 'Serial'}');
+              },
+            ),
+            const SizedBox(width: 6),
+            _SmallButton(
+              label: conn.hartServerRunning ? 'Stop' : 'Start',
+              active: conn.hartServerRunning,
+              onTap: () => _toggleHart(ref, conn.hartServerRunning,
+                  settings.hartServerPort, settings.hartMode,
+                  bindHost: settings.hartTcpHost),
+            ),
+
+            const _VSep(),
+
+            // ── Modbus Server ─────────────────────────────────────────────
+            _StatusDot(active: conn.modbusRunning),
+            const SizedBox(width: 6),
+            const Text('Modbus',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary)),
             const SizedBox(width: 4),
-            Text(conn.modbusError!,
-                style: const TextStyle(fontSize: 11, color: AppColors.error),
-                overflow: TextOverflow.ellipsis),
-            const SizedBox(width: 8),
+            Text(':${conn.modbusPort}',
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textDisabled)),
+            const SizedBox(width: 6),
+            _SmallButton(
+              label: conn.modbusRunning ? 'Stop' : 'Start',
+              active: conn.modbusRunning,
+              onTap: () => _toggleModbus(
+                  ref, conn.modbusRunning, settings.modbusPort,
+                  bindHost: settings.hartTcpHost),
+            ),
+
+            const _VSep(),
+
+            // ── Error banners (if any) ────────────────────────────────────
+            if (conn.hartError != null) ...[
+              const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+              const SizedBox(width: 4),
+              Text(conn.hartError!,
+                  style: const TextStyle(fontSize: 11, color: AppColors.error),
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(width: 8),
+            ],
+            if (conn.modbusError != null) ...[
+              const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+              const SizedBox(width: 4),
+              Text(conn.modbusError!,
+                  style: const TextStyle(fontSize: 11, color: AppColors.error),
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(width: 8),
+            ],
+
+            const SizedBox(width: 24),
+
+            // ── Human / Hex toggle ────────────────────────────────────────
+            const Text('View:',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(width: 6),
+            _SegmentedToggle(
+              options: const ['Human', 'Hex'],
+              selected: hart.showHuman ? 0 : 1,
+              onChanged: (i) =>
+                  ref.read(hartTableProvider.notifier).setShowHuman(i == 0),
+            ),
           ],
-
-          const Spacer(),
-
-          // ── Human / Hex toggle ────────────────────────────────────────
-          const Text('View:',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(width: 6),
-          _SegmentedToggle(
-            options: const ['Human', 'Hex'],
-            selected: hart.showHuman ? 0 : 1,
-            onChanged: (i) =>
-                ref.read(hartTableProvider.notifier).setShowHuman(i == 0),
-          ),
-        ],
+        ),
       ),
     );
   }
