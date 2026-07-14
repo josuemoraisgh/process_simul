@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +15,7 @@ import 'package:process_simul/application/notifiers/hart_table_notifier.dart';
 import 'package:process_simul/application/notifiers/modbus_table_notifier.dart';
 import 'package:process_simul/application/providers/app_providers.dart';
 import 'package:process_simul/data/datasources/sqlite_datasource.dart';
+import 'package:process_simul/data/repositories/db_repository_impl.dart';
 import 'package:process_simul/domain/entities/react_var.dart';
 import 'package:process_simul/presentation/dialogs/add_column_dialog.dart';
 import 'package:process_simul/presentation/dialogs/add_device_dialog.dart';
@@ -35,6 +38,53 @@ Widget _host(Widget child, {List<Override> overrides = const []}) =>
         home: Scaffold(body: SizedBox(width: 1200, height: 800, child: child)),
       ),
     );
+
+class _FakeFilePicker extends FilePicker {
+  String? pickPath;
+  String? savePath;
+
+  @override
+  Future<FilePickerResult?> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    bool allowCompression = true,
+    int compressionQuality = 30,
+    bool allowMultiple = false,
+    bool withData = false,
+    bool withReadStream = false,
+    bool lockParentWindow = false,
+    bool readSequential = false,
+  }) async =>
+      pickPath == null
+          ? null
+          : FilePickerResult(
+              [PlatformFile(name: 'input.xlsx', size: 0, path: pickPath)]);
+
+  @override
+  Future<String?> saveFile({
+    String? dialogTitle,
+    String? fileName,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Uint8List? bytes,
+    bool lockParentWindow = false,
+  }) async =>
+      savePath;
+}
+
+class _FastRepository extends DbRepositoryImpl {
+  _FastRepository(super.datasource);
+
+  @override
+  Future<int> importFromXls(String sourcePath) async => 1;
+
+  @override
+  Future<void> exportToXls(String destPath) async {}
+}
 
 Future<void> _tapText(WidgetTester tester, String text) async {
   await tester.tap(find.text(text).last);
@@ -164,6 +214,7 @@ class _ReadyCustomTypesNotifier extends CustomTypesNotifier {
   }
 
   final calls = <String>[];
+  void emit(CustomTypesState value) => state = value;
 
   @override
   void load() {}
@@ -247,10 +298,13 @@ class _FakeConnectionNotifier extends conn.ConnectionNotifier {
   }
 }
 
-(ProviderContainer, SqliteDatasource) _memoryContainer() {
+(ProviderContainer, SqliteDatasource) _memoryContainer(
+    {bool fastRepository = false}) {
   final datasource = SqliteDatasource()..openAt(':memory:');
   final container = ProviderContainer(overrides: [
     sqliteDatasourceProvider.overrideWithValue(datasource),
+    if (fastRepository)
+      dbRepositoryProvider.overrideWithValue(_FastRepository(datasource)),
     hartTableProvider.overrideWith((ref) => _ReadyHartNotifier(
           ref.watch(dbRepositoryProvider),
           ref.watch(simulTfProvider),
@@ -269,6 +323,13 @@ class _FakeConnectionNotifier extends conn.ConnectionNotifier {
 }
 
 void main() {
+  test('public screen constructors remain directly instantiable', () {
+    final key = UniqueKey();
+    expect(HartTableScreen(key: key), isA<HartTableScreen>());
+    expect(ModbusTableScreen(key: key), isA<ModbusTableScreen>());
+    expect(LogsScreen(key: key), isA<LogsScreen>());
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
@@ -928,40 +989,45 @@ void main() {
         .onPressed!();
     await tester.pump();
     expect(find.textContaining('HART TCP port'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    await tester.enterText(fields.at(2), '5094');
-    await tester.enterText(fields.at(3), '70000');
-    tester
-        .widget<ElevatedButton>(
-            find.widgetWithText(ElevatedButton, 'Save Settings'))
-        .onPressed!();
-    await tester.pump();
-    expect(find.textContaining('Modbus port'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    await tester.enterText(fields.at(3), '502');
-    await tester.enterText(fields.at(0), '1');
-    tester
-        .widget<ElevatedButton>(
-            find.widgetWithText(ElevatedButton, 'Save Settings'))
-        .onPressed!();
-    await tester.pump();
-    expect(find.textContaining('TF step'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    await tester.enterText(fields.at(0), '50');
-    await tester.enterText(fields.at(1), 'not-an-ip');
-    tester
-        .widget<ElevatedButton>(
-            find.widgetWithText(ElevatedButton, 'Save Settings'))
-        .onPressed!();
-    await tester.pump();
-    expect(find.textContaining('bind address'), findsOneWidget);
   });
+
+  for (final validation in const [
+    (field: 3, value: '70000', message: 'Modbus port'),
+    (field: 0, value: '1', message: 'TF step'),
+    (field: 1, value: 'not-an-ip', message: 'bind address'),
+  ]) {
+    testWidgets('Settings validates ${validation.message}', (tester) async {
+      final (container, datasource) = _memoryContainer();
+      addTearDown(() {
+        container.dispose();
+        datasource.close();
+      });
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            home: Scaffold(
+                body: SettingsScreen(enumeratePorts: () async => const []))),
+      ));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+          find.byType(TextField).at(validation.field), validation.value);
+      tester
+          .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, 'Save Settings'))
+          .onPressed!();
+      await tester.pump();
+      expect(find.textContaining(validation.message), findsWidgets);
+    });
+  }
 
   testWidgets('Settings covers serial process output, fallback and failure',
       (tester) async {
     Future<void> render(
         Future<ProcessResult> Function(String, List<String>) runner) async {
       final (container, datasource) = _memoryContainer();
+      await container
+          .read(settingsProvider.notifier)
+          .update((settings) => settings.copyWith(hartSerialPort: 'MISSING'));
       await tester.pumpWidget(UncontrolledProviderScope(
         container: container,
         child: MaterialApp(
@@ -977,6 +1043,10 @@ void main() {
 
     await render((_, __) async => ProcessResult(1, 0, 'COM8, COM3', ''));
     expect(find.text('COM3', skipOffstage: false), findsWidgets);
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pump();
+    await tester.tap(find.text('COM3').last);
+    await tester.pump();
     await render((_, __) async => ProcessResult(1, 0, '', ''));
     await render((_, __) => Future<ProcessResult>.error(StateError('failed')));
   });
@@ -1018,7 +1088,29 @@ void main() {
     await tester.enterText(enumFields.last, 'Two');
     await tester.tap(find.text('Salvar'));
     await tester.pump(const Duration(milliseconds: 500));
+    final enumTile = find.ancestor(
+        of: find.text('ENUM29'), matching: find.byType(ExpansionTile));
+    final enumButtons =
+        find.descendant(of: enumTile, matching: find.byType(IconButton));
+    tester.widget<IconButton>(enumButtons.at(2)).onPressed!();
+    await tester.pump();
+    await tester.tap(find.text('Salvar'));
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.widget<IconButton>(enumButtons.at(3)).onPressed!();
+    await tester.pump();
+    final enumRemoveGroup = find.ancestor(
+        of: find.byTooltip('Remover grupo'), matching: find.byType(IconButton));
+    tester.widget<IconButton>(enumRemoveGroup).onPressed!();
+    await tester.pump();
+    await tester.tap(find.text('Cancelar'));
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.widget<IconButton>(enumRemoveGroup).onPressed!();
+    await tester.pump();
+    await tester.tap(find.text('Remover'));
+    await tester.pump(const Duration(milliseconds: 300));
     expect(custom.calls.where((call) => call == 'add-enum').length, 2);
+    expect(
+        custom.calls, containsAll(['edit-enum', 'rm-enum', 'rm-enum-group']));
   });
 
   testWidgets('Settings executes BIT_ENUM and command CRUD callbacks',
@@ -1076,11 +1168,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     tester.widget<IconButton>(bitButtons.at(3)).onPressed!();
     await tester.pump();
-    tester
-        .widget<IconButton>(find.ancestor(
-            of: find.byTooltip('Remover grupo'),
-            matching: find.byType(IconButton)))
-        .onPressed!();
+    final bitRemoveGroup = find.ancestor(
+        of: find.byTooltip('Remover grupo'), matching: find.byType(IconButton));
+    tester.widget<IconButton>(bitRemoveGroup).onPressed!();
+    await tester.pump();
+    await tester.tap(find.text('Cancelar'));
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.widget<IconButton>(bitRemoveGroup).onPressed!();
     await tester.pump();
     await tester.tap(find.text('Remover'));
     await tester.pump(const Duration(milliseconds: 300));
@@ -1109,6 +1203,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     tester.widget<IconButton>(commandButtons.last).onPressed!();
     await tester.pump();
+    await tester.tap(find.text('Cancelar'));
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.widget<IconButton>(commandButtons.last).onPressed!();
+    await tester.pump();
     await tester.tap(find.text('Remover'));
     await tester.pump();
 
@@ -1123,6 +1221,69 @@ void main() {
           'edit-command',
           'rm-command'
         ]));
+  });
+
+  testWidgets('Settings renders empty custom type groups', (tester) async {
+    final (container, datasource) = _memoryContainer();
+    addTearDown(() {
+      container.dispose();
+      datasource.close();
+    });
+    final custom = container.read(customTypesProvider.notifier)
+        as _ReadyCustomTypesNotifier;
+    custom.emit(const CustomTypesState(loading: false));
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+          home: Scaffold(
+              body: SettingsScreen(enumeratePorts: () async => const []))),
+    ));
+    await tester.pump(const Duration(milliseconds: 100));
+    final scroll = find.byType(Scrollable).first;
+    for (final group in ['ENUMs', 'BIT_ENUMs', 'Commands']) {
+      await tester.scrollUntilVisible(find.text(group), 400,
+          scrollable: scroll);
+      await tester.tap(find.text(group));
+      await tester.pump();
+    }
+    expect(find.text('Nenhum grupo ENUM definido.'), findsOneWidget);
+    expect(find.text('Nenhum grupo BIT_ENUM definido.'), findsOneWidget);
+    expect(find.text('Nenhum comando definido.'), findsOneWidget);
+  });
+
+  testWidgets('Settings default FilePicker paths and cancellation',
+      (tester) async {
+    final (container, datasource) = _memoryContainer(fastRepository: true);
+    final picker = _FakeFilePicker()
+      ..savePath = '/tmp/output.xlsx'
+      ..pickPath = '/tmp/input.xlsx';
+    FilePicker.platform = picker;
+    addTearDown(() {
+      container.dispose();
+      datasource.close();
+    });
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+          home: Scaffold(
+              body: SettingsScreen(enumeratePorts: () async => const []))),
+    ));
+    await tester.pump(const Duration(milliseconds: 100));
+    final scroll = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.text('Exportar para .xlsx'), 400,
+        scrollable: scroll);
+    await tester.tap(find.text('Exportar para .xlsx'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Importar de .xlsx'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('Importado'), findsOneWidget);
+
+    picker.pickPath = null;
+    picker.savePath = null;
+    await tester.tap(find.text('Importar de .xlsx'));
+    await tester.pump();
+    await tester.tap(find.text('Exportar para .xlsx'));
+    await tester.pump();
   });
 
   testWidgets('MainShell covers wide, compact, fullscreen and navigation',

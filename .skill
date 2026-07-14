@@ -57,5 +57,11 @@ Ele nao assume um runtime ou schema externo de skills.
 ## Ultima execucao
 
 Em 2026-07-14, todos os gates funcionais foram aprovados: analyzer limpo,
-96/96 testes e 85,27% de cobertura de linhas. Consulte `AUDIT_HANDOFF.md` e
-`docs/audit/README.md` para numeros por camada, decisoes e riscos residuais.
+179/179 testes e 5010/5010 linhas executaveis cobertas (100%). A auditoria
+abrange 51 arquivos Dart: 46 instrumentaveis e 5 sem linhas executaveis.
+Consulte `AUDIT_HANDOFF.md` e `docs/audit/README.md` para decisoes e riscos.
+
+Ao retomar, preserve os gates: rode `flutter analyze`, `flutter test
+--coverage`, confirme `LH == LF` em cada registro LCOV e compare todos os
+arquivos `lib/**/*.dart` com os registros `SF`. Nao conte arquivos puramente
+declarativos como lacuna e nao use exclusoes de cobertura para atingir a meta.

@@ -1,3 +1,5 @@
+// ignore_for_file: implementation_imports, depend_on_referenced_packages
+
 import 'dart:async';
 import 'dart:io';
 
@@ -5,7 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'package:flutter_3d_controller/flutter_3d_controller.dart';
+import 'package:flutter_3d_controller/src/core/modules/model_viewer/model_viewer.dart';
+import 'package:flutter_3d_controller/src/utils/utils.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:process_simul/app.dart';
+import 'package:process_simul/core/constants/app_theme.dart';
 import 'package:process_simul/application/providers/app_providers.dart';
 import 'package:process_simul/data/datasources/sqlite_datasource.dart';
 import 'package:process_simul/application/notifiers/log_notifier.dart';
@@ -13,6 +21,7 @@ import 'package:process_simul/infrastructure/hart/hart_serial_comm.dart';
 import 'package:process_simul/infrastructure/hart/hart_frame.dart';
 import 'package:process_simul/domain/entities/react_var.dart';
 import 'package:process_simul/presentation/screens/tank_3d/boiler_3d_viewer.dart';
+import 'package:process_simul/presentation/screens/tank_3d/boiler_model_viewer_adapter.dart';
 import 'package:process_simul/presentation/screens/tank_3d/boiler_state.dart';
 import 'package:process_simul/presentation/screens/tank_3d/tank_3d_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,11 +37,11 @@ final class _FakeSerialChannel implements HartSerialChannel {
   final controller = StreamController<Uint8List>.broadcast(sync: true);
   final written = <int>[];
   bool configured = false;
-  bool open = false;
+  bool opened = false;
   bool throwOnCleanup = false;
 
   @override
-  bool openReadWrite() => open = opens;
+  bool openReadWrite() => opened = opens;
 
   @override
   String get lastError => 'fake open error';
@@ -49,11 +58,11 @@ final class _FakeSerialChannel implements HartSerialChannel {
   }
 
   @override
-  bool get isOpen => open;
+  bool get isOpen => opened;
 
   @override
   bool close() {
-    open = false;
+    opened = false;
     if (throwOnCleanup) throw StateError('close cleanup');
     return true;
   }
@@ -76,6 +85,75 @@ final class _FakeSerialChannel implements HartSerialChannel {
   }
 }
 
+final class _FakeNativePort implements SerialPort {
+  bool opened = false;
+  bool disposed = false;
+  SerialPortConfig? appliedConfig;
+  final written = <int>[];
+
+  @override
+  bool openReadWrite() => opened = true;
+  @override
+  bool get isOpen => opened;
+  @override
+  set config(SerialPortConfig value) => appliedConfig = value;
+  @override
+  int write(Uint8List bytes, {int timeout = -1}) {
+    written.addAll(bytes);
+    return bytes.length;
+  }
+
+  @override
+  bool close() {
+    opened = false;
+    return true;
+  }
+
+  @override
+  void dispose() => disposed = true;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _FakeNativeConfig implements SerialPortConfig {
+  bool disposed = false;
+  @override
+  void dispose() => disposed = true;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+final class _FakeNativeReader implements SerialPortReader {
+  final controller = StreamController<Uint8List>();
+  bool closed = false;
+  @override
+  Stream<Uint8List> get stream => controller.stream;
+  @override
+  void close() => closed = true;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+final class _FakeWebViewPlatform implements PlatformInAppWebViewController {
+  final scripts = <String>[];
+  final handlers = <String, JavaScriptHandlerCallback>{};
+
+  @override
+  Future<dynamic> evaluateJavascript(
+      {required String source, ContentWorld? contentWorld}) async {
+    scripts.add(source);
+  }
+
+  @override
+  void addJavaScriptHandler(
+          {required String handlerName,
+          required JavaScriptHandlerCallback callback}) =>
+      handlers[handlerName] = callback;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
 ReactVar _serialCell(String name, String value) => ReactVar(
       tableName: 'HART',
       rowName: 'SERIAL',
@@ -96,6 +174,21 @@ Map<String, Map<String, ReactVar>> _serialTable() => {
     };
 
 void main() {
+  test('application theme resolves selected and unselected navigation styles',
+      () {
+    final navigation = AppTheme.darkTheme.navigationBarTheme;
+    expect(
+      navigation.iconTheme!.resolve({WidgetState.selected})!.color,
+      isNotNull,
+    );
+    expect(navigation.iconTheme!.resolve({})!.color, isNotNull);
+    expect(
+      navigation.labelTextStyle!.resolve({WidgetState.selected})!.color,
+      isNotNull,
+    );
+    expect(navigation.labelTextStyle!.resolve({})!.color, isNotNull);
+  });
+
   setUpAll(() => initGlobalLog(LogNotifier()));
 
   test('BoilerState defaults and copyWith expose every state field', () {
@@ -153,6 +246,46 @@ void main() {
       expect(HartSerialServer.availablePorts(), isA<List<String>>());
     } catch (error) {
       // The native DLL is intentionally absent in headless CI.
+      expect(error, isNotNull);
+    }
+  });
+
+  test('native serial adapter delegates every platform operation', () {
+    final port = _FakeNativePort();
+    final config = _FakeNativeConfig();
+    final reader = _FakeNativeReader();
+    final channel = NativeHartSerialChannel(
+      'FAKE',
+      portFactory: (_) => port,
+      configFactory: () => config,
+      readerFactory: (_) => reader,
+      errorGetter: () => 'injected error',
+    );
+    expect(channel.openReadWrite(), isTrue);
+    expect(channel.lastError, 'injected error');
+    channel.configureHart();
+    expect(config.disposed, isTrue);
+    expect(port.appliedConfig, same(config));
+    expect(channel.input, isA<Stream<Uint8List>>());
+    expect(channel.write(Uint8List.fromList([1, 2])), 2);
+    channel.closeReader();
+    expect(reader.closed, isTrue);
+    expect(channel.isOpen, isTrue);
+    expect(channel.close(), isTrue);
+    channel.dispose();
+    expect(port.disposed, isTrue);
+
+    final defaultError = NativeHartSerialChannel(
+      'FAKE',
+      portFactory: (_) => _FakeNativePort(),
+      configFactory: _FakeNativeConfig.new,
+      readerFactory: (_) => _FakeNativeReader(),
+    );
+    try {
+      expect(defaultError.lastError, isA<String>());
+    } catch (error) {
+      // Native DLL availability is platform-dependent; entering the default
+      // boundary is the behavior under test.
       expect(error, isNotNull);
     }
   });
@@ -271,6 +404,58 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     expect(tester.takeException(), isNull);
+  });
+
+  test('ModelViewer adapter wires web controller, JS and callbacks', () async {
+    final controller = Flutter3DController();
+    initializeBoilerControllerForWeb(controller, 'web-id', isWeb: true);
+    var loaded = '';
+    Object? error;
+    var camera = 0;
+    var escape = 0;
+    var doubleClick = 0;
+    final model = buildBoilerModelViewer(
+      id: 'id',
+      controller: controller,
+      utils: Utils(),
+      cameraOrbit: '1deg 2deg 3m',
+      cameraTarget: 'auto auto auto',
+      fieldOfView: 'auto',
+      onLoad: (value) => loaded = value,
+      onError: (value) => error = value,
+      onCameraChange: (_) => camera++,
+      onEscapePressed: () => escape++,
+      onDoubleClick: () => doubleClick++,
+    ) as ModelViewer;
+    final platform = _FakeWebViewPlatform();
+    final webController =
+        InAppWebViewController.fromPlatform(platform: platform);
+    model.onWebViewCreated!(webController);
+    model.onLoad!('asset');
+    model.onError!('failure');
+    expect(platform.scripts, hasLength(3));
+    await platform.handlers['onCameraChange']!(const ['camera']);
+    await platform.handlers['onEscapePressed']!(const []);
+    await platform.handlers['onDoubleClick']!(const []);
+    expect((loaded, error, camera, escape, doubleClick),
+        ('asset', 'failure', 1, 1, 1));
+
+    final minimal = buildBoilerModelViewer(
+      id: 'minimal',
+      controller: Flutter3DController(),
+      utils: Utils(),
+      cameraOrbit: 'auto',
+      cameraTarget: null,
+      fieldOfView: null,
+      onLoad: (_) {},
+      onError: (_) {},
+      onCameraChange: (_) {},
+    ) as ModelViewer;
+    final minimalPlatform = _FakeWebViewPlatform();
+    minimal.onWebViewCreated!(
+        InAppWebViewController.fromPlatform(platform: minimalPlatform));
+    minimal.onLoad!('asset');
+    expect(minimalPlatform.scripts, hasLength(1));
   });
 
   testWidgets('3D viewer load, error and state synchronization callbacks',

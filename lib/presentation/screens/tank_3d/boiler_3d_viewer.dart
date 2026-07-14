@@ -5,15 +5,11 @@
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_3d_controller/flutter_3d_controller.dart';
-import 'package:flutter_3d_controller/src/core/modules/model_viewer/model_viewer.dart';
-import 'package:flutter_3d_controller/src/data/datasources/i_flutter_3d_datasource.dart';
-import 'package:flutter_3d_controller/src/data/repositories/flutter_3d_repository.dart';
 import 'package:flutter_3d_controller/src/utils/utils.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'boiler_model_viewer_adapter.dart';
 import 'boiler_state.dart';
 
 /// 3D Boiler viewer using ModelViewer directly for full control
@@ -58,7 +54,6 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
   late final String _id;
   final Utils _utils = Utils();
   bool _isLoaded = false;
-  InAppWebViewController? _webViewController;
   String? _cameraOrbit;
   String? _cameraTarget;
   String? _fieldOfView;
@@ -77,10 +72,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
     super.initState();
     _id = _utils.generateId();
     _controller = Flutter3DController();
-    if (kIsWeb) {
-      _controller
-          .init(Flutter3DRepository(IFlutter3DDatasource(_id, null, false)));
-    }
+    initializeBoilerControllerForWeb(_controller, _id);
     _loadCameraState();
   }
 
@@ -131,11 +123,7 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
   }
 
   void _injectJsHandlers() {
-    final wvc = _webViewController;
-    final evaluator = widget.javascriptEvaluator ??
-        (wvc == null
-            ? null
-            : (String source) => wvc.evaluateJavascript(source: source));
+    final evaluator = widget.javascriptEvaluator;
     if (evaluator == null) return;
     // Apply tone-mapping and extra rendering attributes via JS
     evaluator('''
@@ -208,60 +196,18 @@ class _Boiler3dViewerState extends State<Boiler3dViewer> {
     if (viewerBuilder != null) {
       return viewerBuilder(_handleModelLoad, _handleModelError);
     }
-    return ModelViewer(
+    return buildBoilerModelViewer(
       id: _id,
-      src: 'assets/models/tank.glb',
-      backgroundColor: const Color(0xFF1a1a2e),
-      environmentImage: 'neutral',
-      exposure: 1.2,
-      shadowIntensity: 1.0,
-      shadowSoftness: 0.8,
-      cameraControls: true,
-      autoRotate: false,
+      controller: _controller,
+      utils: _utils,
       cameraOrbit: _cameraOrbit!,
       cameraTarget: _cameraTarget,
       fieldOfView: _fieldOfView,
-      interactionPrompt: InteractionPrompt.none,
-      disableTap: true,
-      ar: false,
-      autoPlay: false,
-      debugLogging: false,
-      activeGestureInterceptor: true,
-      relatedCss: '''
-        model-viewer {
-          --poster-color: #1a1a2e;
-          --progress-bar-color: #4fc3f7;
-        }
-      ''',
-      relatedJs: _utils.injectedJS(_id, 'flutter-3d-controller'),
       onLoad: _handleModelLoad,
       onError: _handleModelError,
-      onWebViewCreated: kIsWeb
-          ? null
-          : (InAppWebViewController webViewController) {
-              _webViewController = webViewController;
-              _controller.init(
-                Flutter3DRepository(
-                  IFlutter3DDatasource(_id, webViewController, true),
-                ),
-              );
-              webViewController.addJavaScriptHandler(
-                handlerName: 'onCameraChange',
-                callback: _handleCameraChange,
-              );
-              if (widget.onEscapePressed != null) {
-                webViewController.addJavaScriptHandler(
-                  handlerName: 'onEscapePressed',
-                  callback: (_) => widget.onEscapePressed!(),
-                );
-              }
-              if (widget.onDoubleClick != null) {
-                webViewController.addJavaScriptHandler(
-                  handlerName: 'onDoubleClick',
-                  callback: (_) => widget.onDoubleClick!(),
-                );
-              }
-            },
+      onCameraChange: _handleCameraChange,
+      onEscapePressed: widget.onEscapePressed,
+      onDoubleClick: widget.onDoubleClick,
     );
   }
 }

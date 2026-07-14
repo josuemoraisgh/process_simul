@@ -92,19 +92,18 @@ desempenho, seguranca e manutenibilidade.
 ## Resultado final verificado
 
 - `flutter analyze`: sem ocorrencias.
-- `flutter test`: 96/96 aprovados; matriz de integracao aprovada tres vezes
-  antes da ampliacao final de cobertura, e suite final de cobertura aprovada.
-- Cobertura de linhas instrumentadas: 2014/2362 = 85,27%.
-- `HartTransmitter`: 346/350 = 98,86%.
-- `SqliteDatasource`: 495/513 = 96,49%.
-- Domain: 83,14%; application: 66,17%; infrastructure: 87,17%; data:
-  86,81%. O alvo global de 80% foi atingido; os alvos aspiracionais de 90% por
-  camada nao foram atingidos em application/domain e ficam registrados, sem
-  alegacao de cobertura inexistente.
+- `flutter test --coverage`: 179/179 aprovados.
+- Cobertura de linhas instrumentadas: 5010/5010 = 100%.
+- 51 arquivos Dart auditados: 46 possuem linhas executaveis e estao no LCOV;
+  5 contem somente constantes, enums ou contratos abstratos e nao geram `DA`.
+- Domain, application, infrastructure, data, presentation e bootstrap: 100%
+  das linhas executaveis instrumentadas.
 - LCOV desta ferramenta nao registrou branches (`BRF/BRH` ausentes), portanto
-  a meta de branches nao pode ser comprovada nesta execucao.
+  cobertura de branches continua nao mensuravel nesta configuracao.
 - Registry HART, parser/funcoes comuns e catalogo persistente HART/Modbus/misto
   estao ligados ao runtime e protegidos por testes de socket/SQLite.
+- Remover comando HART padrao cria bloqueio explicito contra o fallback legado;
+  o comando so volta a executar apos novo registro.
 
 ## Ambiguidades bloqueadas contra suposicao
 

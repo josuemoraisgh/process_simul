@@ -23,6 +23,10 @@ Funcoes reutilizaveis implementam `HartFunction` e ficam disponiveis a todos os 
 
 Em Riverpod, sobrescreva `hartCommandRegistryProvider` ou `hartFunctionRegistryProvider` no composition root. TCP e serial recebem o mesmo transmissor, sem registry global oculto. Chamadas antigas a `HartTransmitter.process(...)` continuam validas.
 
+`removeCommand(codigo)` agora tambem impede que o adaptador legado atenda esse
+codigo. Para restaura-lo, registre novamente um `HartCommandHandler` com o
+mesmo codigo. Isso torna remocao de comandos padrao e customizados simetrica.
+
 ## Equipamentos
 
 Antes:
@@ -53,3 +57,9 @@ O campo persistido `hartTcpHost` tinha rotulo legado de destino de cliente e
 nao era consumido. Ele agora e o endereco de bind comum dos servidores HART TCP
 e Modbus: `127.0.0.1` mantem acesso local; `0.0.0.0` e o opt-in explicito para
 LAN. Somente enderecos IP validos sao aceitos.
+
+## Importacao e exportacao
+
+O formato suportado e `.xlsx`. Chamadas de UI ou automacao que ofereciam
+`.xls` devem restringir o filtro para `.xlsx`; o formato binario antigo nunca
+foi decodificado pelo runtime. O schema valido permanece compativel.

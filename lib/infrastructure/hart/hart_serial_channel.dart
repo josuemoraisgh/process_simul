@@ -19,20 +19,33 @@ typedef HartSerialChannelFactory = HartSerialChannel Function(String name);
 /// Thin platform adapter; protocol behavior remains independently testable
 /// without loading the native serial library.
 final class NativeHartSerialChannel implements HartSerialChannel {
-  NativeHartSerialChannel(String name) : _port = SerialPort(name);
+  NativeHartSerialChannel(
+    String name, {
+    SerialPort Function(String name)? portFactory,
+    SerialPortConfig Function()? configFactory,
+    SerialPortReader Function(SerialPort port)? readerFactory,
+    String Function()? errorGetter,
+  })  : _port = (portFactory ?? SerialPort.new)(name),
+        _configFactory = configFactory ?? SerialPortConfig.new,
+        _readerFactory = readerFactory ?? SerialPortReader.new,
+        _errorGetter = errorGetter ??
+            (() => SerialPort.lastError?.message ?? 'Unknown error');
 
   final SerialPort _port;
+  final SerialPortConfig Function() _configFactory;
+  final SerialPortReader Function(SerialPort port) _readerFactory;
+  final String Function() _errorGetter;
   SerialPortReader? _reader;
 
   @override
   bool openReadWrite() => _port.openReadWrite();
 
   @override
-  String get lastError => SerialPort.lastError?.message ?? 'Unknown error';
+  String get lastError => _errorGetter();
 
   @override
   void configureHart() {
-    final config = SerialPortConfig()
+    final config = _configFactory()
       ..baudRate = 1200
       ..bits = 8
       ..parity = SerialPortParity.odd
@@ -43,7 +56,7 @@ final class NativeHartSerialChannel implements HartSerialChannel {
     } finally {
       config.dispose();
     }
-    _reader = SerialPortReader(_port);
+    _reader = _readerFactory(_port);
   }
 
   @override

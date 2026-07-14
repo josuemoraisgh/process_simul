@@ -42,7 +42,7 @@ void main() {
 
     transmitter.removeCommand(0x01);
     expect(
-      transmitter.processCommand(
+      transmitter.dispatch(
         command: 0x01,
         requestBody: const [],
         device: device,
@@ -56,7 +56,7 @@ void main() {
       (_) => const [0, 0, 0xAA],
     ));
     expect(
-      transmitter.processCommand(
+      transmitter.dispatch(
         command: 0x01,
         requestBody: const [],
         device: device,

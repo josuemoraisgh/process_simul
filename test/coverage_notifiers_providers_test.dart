@@ -498,6 +498,17 @@ void main() {
     expect(exceptional.state.hartSerialPort, 'FAKE');
     await exceptional.stopHartServer();
     exceptional.dispose();
+
+    final disposeExceptional = ConnectionNotifier(
+      hart,
+      mb,
+      hartSerialFactory: (name, table, writer, transmitter) =>
+          SuccessfulThrowingStopSerial(name),
+    );
+    await disposeExceptional.startHartSerial(
+        'FAKE', () => db.hart, (_, __, ___) {});
+    disposeExceptional.dispose();
+    await Future<void>.delayed(Duration.zero);
     hart.dispose();
     mb.dispose();
   });

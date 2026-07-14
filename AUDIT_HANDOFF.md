@@ -1,6 +1,6 @@
 # Handoff — Auditoria e Refatoracao
 
-Ultima atualizacao: 2026-07-14, durante a segunda onda de implementacao.
+Ultima atualizacao: 2026-07-14, apos fechamento integral da segunda onda.
 
 Este documento e a fonte de continuidade para outro agente. Leia tambem
 `.spec` (requisitos/DoD) e `.skill` (protocolo operacional) antes de editar.
@@ -115,7 +115,8 @@ Primeira onda concluida:
 - Antes das ondas 2, suite chegou a 67/67 com arquitetura extensivel.
 
 Concluido: import rollback, lifecycle, registry por socket, equipamento por
-SQLite, matriz de 59 comandos e CRUD/export/import. Cobertura final 85,27%.
+SQLite, matriz de 59 comandos e CRUD/export/import. A segunda onda ampliou a
+suite e fechou a cobertura executavel em 100%.
 
 ### Agente 6 — Integracao — concluida em 2026-07-14
 
@@ -176,12 +177,16 @@ wiring real; nao regredir para parsing/comandos/CRUD acoplados.
 
 - `flutter analyze`: sem ocorrencias.
 - `git diff --check`: sem erros; somente avisos informativos LF/CRLF.
-- Tres execucoes consecutivas da suite integrada: 82/82 aprovadas.
-- Suite ampliada final: 96/96 aprovada.
-- Coverage: 2014/2362 linhas = 85,27%.
-- Domain 83,14%; application 66,17%; infrastructure 87,17%; data 86,81%.
-- `HartTransmitter` 98,86%; `SqliteDatasource` 96,49%.
+- Suite integrada final: 179/179 aprovada.
+- Coverage: 5010/5010 linhas executaveis = 100%.
+- 51 arquivos Dart auditados: 46 registros LCOV em 100%; 5 arquivos apenas
+  declarativos, sem linhas executaveis instrumentaveis.
+- Todas as camadas e adaptadores serial, Win32 e WebView estao em 100% de
+  linhas proprias mediante dependencias de plataforma injetaveis.
 - Branch coverage nao foi emitida pelo LCOV nesta configuracao.
-- Ultima correcao apos integracao: todos os prepared statements do import XLSX
-  agora usam `try/finally`; teste focado de rollback passou e analyzer ficou
-  limpo.
+- Correcao final de arquitetura: remover comando HART padrao nao reativa mais
+  o fallback legado; tombstone e teste permitem remover/re-registrar com
+  semantica previsivel.
+- Cleanup de sockets e `dispose` de servidores agora contem falhas de teardown.
+- XLSX valida ZIP antes de descompactar (entradas, expansao, razao, ZIP64 e
+  criptografia), valida schema antes de mutar e importa em transacao atomica.

@@ -33,6 +33,10 @@ Data: 2026-07-14
 
 `CLEAN-01 | modbus_table_screen.dart | medio | evaluator duplicado divergia do runtime | duas implementacoes | uso do engine canonico | hart_transmitter_test.dart`
 
+`ARCH-03 | hart_command_registry.dart:remove/dispatch | alto | comando padrao removido era reativado pelo fallback legado | remocao de 0x01 seguida de dispatch | tombstone limpo apenas em novo registro | hart_transmitter_test.dart`
+
+`LIFE-02 | socket_error_guard.dart/connection_notifier.dart | medio | excecao de teardown podia escapar de callback/dispose | fakes que lancam no close | cleanup best-effort com log | coverage_infrastructure_test.dart e coverage_notifiers_providers_test.dart`
+
 ## Riscos residuais
 
 - O schema Modbus nao define identidade de equipamento, `unit-id` ou relacao entre ponto e equipamento. Equipamentos Modbus sao persistidos como definicao/perfil, sem associar pontos automaticamente.
@@ -43,16 +47,12 @@ Data: 2026-07-14
 ## Validacao final
 
 - Analyzer: limpo.
-- Suite integrada: 82/82 aprovada tres vezes consecutivas.
-- Suite ampliada: 96/96 aprovada.
-- Cobertura total: 2014/2362 linhas, 85,27%.
-- `HartTransmitter`: 98,86%; `SqliteDatasource`: 96,49%.
-- Domain: 83,14%; application: 66,17%; infrastructure: 87,17%; data: 86,81%.
+- Suite integrada: 179/179 aprovada.
+- Cobertura total: 5010/5010 linhas executaveis, 100%.
+- 51 arquivos Dart auditados; 46 instrumentados a 100% e 5 puramente
+  declarativos sem linhas LCOV.
+- Domain, application, infrastructure, data, presentation e bootstrap: 100%.
 - Branch coverage nao foi registrada pelo LCOV usado nesta execucao.
-
-O alvo global de 80% foi atingido. Os alvos aspiracionais de 90% por camada
-nao foram atingidos em domain/application; os numeros reais ficam expostos
-para orientar a proxima rodada, sobretudo testes de notifiers e bootstrap.
 
 ## Riscos externos e proximas decisoes
 
@@ -62,8 +62,7 @@ para orientar a proxima rodada, sobretudo testes de notifiers e bootstrap.
   sao descartados para impedir escrita no equipamento errado.
 - `0.0.0.0` habilita LAN explicitamente para HART/Modbus, mas autenticacao e
   allowlist dependem de politica operacional ainda nao fornecida.
-- O picker ainda anuncia `.xls`, enquanto o decoder utilizado e XLSX; suporte
-  binario real exige biblioteca/conversao definida.
-- O limite comprimido de 10 MiB reduz risco, mas quota de expansao contra ZIP
-  bomb requer decoder que exponha controle da descompressao ou isolate.
+- O picker aceita apenas `.xlsx`; `.xls` binario segue fora do contrato.
+- O container XLSX e verificado antes da descompressao contra excesso de
+  entradas, expansao, razao de compressao, criptografia e ZIP64.
 - Serial e viewer 3D exigem smoke em hardware/plataforma alvo.

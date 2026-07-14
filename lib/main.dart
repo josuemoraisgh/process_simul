@@ -42,12 +42,10 @@ Future<void> bootstrapApplication({
 /// documents database or installing a global Flutter view.
 Future<void> initializeApplication({
   ProviderContainer? providerContainer,
-  ProviderContainer Function()? providerContainerFactory,
+  ProviderContainer Function() providerContainerFactory = ProviderContainer.new,
   void Function(Widget app)? runner,
 }) async {
-  final container = providerContainer ??
-      providerContainerFactory?.call() ??
-      ProviderContainer();
+  final container = providerContainer ?? providerContainerFactory();
   final appRunner = runner ?? runApp;
 
   // Create a ProviderContainer to initialise services before first frame.

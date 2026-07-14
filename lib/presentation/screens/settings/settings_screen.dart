@@ -32,6 +32,36 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  static const _fallbackPorts = <String>[
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'COM10',
+    'COM11',
+    'COM12',
+    'COM13',
+    'COM14',
+    'COM15',
+    'COM16',
+    'COM17',
+    'COM18',
+    'COM19',
+    'COM20',
+    'CNCA0',
+    'CNCB0',
+    'CNCA1',
+    'CNCB1',
+    'CNCA2',
+    'CNCB2',
+    'CNCA3',
+    'CNCB3',
+  ];
   late TextEditingController _tcpHostCtrl;
   late TextEditingController _hartSrvPortCtrl;
   late TextEditingController _modbusPortCtrl;
@@ -86,16 +116,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<List<String>> _enumeratePorts() async {
     if (widget.enumeratePorts != null) return widget.enumeratePorts!();
+    if (widget.runProcess != null) {
+      return _enumerateWindowsPorts(widget.runProcess!);
+    }
     if (!Platform.isWindows) return [];
+    return _enumerateWindowsPorts(Process.run);
+  }
+
+  Future<List<String>> _enumerateWindowsPorts(
+      Future<ProcessResult> Function(String, List<String>) runner) async {
     try {
-      final result = await (widget.runProcess ?? Process.run)('powershell', [
+      final result = await runner('powershell', [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
         '[System.IO.Ports.SerialPort]::GetPortNames() -join ","',
       ]);
       final out = result.stdout.toString().trim();
-      if (out.isEmpty) return _fallbackPorts();
+      if (out.isEmpty) return _fallbackPorts;
       final ports = out
           .split(',')
           .map((s) => s.trim())
@@ -104,21 +142,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ports.sort();
       return ports;
     } catch (_) {
-      return _fallbackPorts();
+      return _fallbackPorts;
     }
-  }
-
-  List<String> _fallbackPorts() {
-    final ports = <String>[];
-    for (int i = 1; i <= 20; i++) {
-      ports.add('COM$i');
-    }
-    // Add common virtual com0com ports
-    for (int i = 0; i <= 3; i++) {
-      ports.add('CNCA$i');
-      ports.add('CNCB$i');
-    }
-    return ports;
   }
 
   // ── Import from XLS ──────────────────────────────────────────────────────
@@ -270,9 +295,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         child: _PortDropdown(
                           value: _availablePorts.contains(_selectedPort)
                               ? _selectedPort
-                              : (_availablePorts.isNotEmpty
-                                  ? _availablePorts.first
-                                  : null),
+                              : null,
                           items: _availablePorts,
                           loading: _loadingPorts,
                           onChanged: (v) {
